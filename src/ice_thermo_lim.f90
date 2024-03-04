@@ -7,6 +7,12 @@ implicit none
 ! FD debug
 double precision sume1, sume2, dsume
 
+      integer ipsnow, ipmelt
+
+! restart
+double precision, dimension(maxlay) :: ti0, ts0, dzi0, dzs0
+double precision hi0, hs0, tsu0
+
 contains
 
       SUBROUTINE ice_thermo_diff(dtice,ln_write,numout)
@@ -71,10 +77,8 @@ contains
      &           zspeche_i(0:nlice),ztsold(0:nlsno),ztiold(0:nlice),  &
      &           zeta_s(0:nlsno),zeta_i(0:nlice),ztrid(2*maxlay+1,3), &
      &           zindterm(2*maxlay+1),zindtbis(2*maxlay+1), &
-     &           zdiagbis(2*maxlay+1),   &
-     &           ti_old(0:nlice)
+     &           zdiagbis(2*maxlay+1)
 
-      integer isnow, imelt
       double precision &
                  zrchu1, zrchu2, zqsat, zssdqw, ztmelt_i, zkimin, &
                  zg1s, ztsuold, ztsutemp, zg1, zeps, zerrit, &
@@ -85,13 +89,15 @@ contains
       integer nconv, nconv_max
       double precision sk, tk
       double precision tmelts
-      
+      double precision hslim
+
       ! Local constants	
       zeps      =  1.0d-20
       zg1s      =  2.d0
       zg1       =  2.d0
       zbeta     =  0.117d0   ! factor for thermal conductivity
       zerrmax   =  1.0d-11   ! max error at the surface
+hslim=0.0005d0
 
       IF ( ln_write ) THEN
          WRITE(numout,*) ' ** ice_thermo_lim : '
@@ -104,17 +110,18 @@ contains
       nconv_max = 50
 
       ! Switches 
-      ! isnow equals 1 if snow is present and 0 if absent
-! FD pb with sign function      isnow   = int(1.d0-max(0.d0,sign(1.d0,-hs)))
-      if ( hs > 0.d0 ) then 
-        isnow = 1
+      ! ipsnow equals 1 if snow is present and 0 if absent
+! FD pb with sign function      ipsnow   = int(1.d0-max(0.d0,sign(1.d0,-hs)))
+      if ( hs > hslim ) then 
+        ipsnow = 1
       else
-        isnow = 0
+        ipsnow = 0
       endif
-      ! imelt equals 1 if surface is melting and 0 if not
-      imelt   = int(max(0.d0,sign(1.d0,tsu-tp0)))
+      ! ipmelt equals 1 if surface is melting and 0 if not
+      ipmelt   = int(max(0.d0,sign(1.d0,tsu-tp0)))
 
-      tmelt   = dble(isnow)*tmelt_sno+ (1.d0-dble(isnow))*tmelt_ice
+      tmelts = -fracsal*si(1) + tp0
+      tmelt   = dble(ipsnow)*tmelt_sno+ (1.d0-dble(ipsnow))*tmelts
 
       ! Oceanic  heat flux and precipitations
       heatflx_bot = oceflx 
@@ -145,8 +152,17 @@ contains
       END DO
       DO layer = 1, nlsno
          tmelts = 0.d0
-         sume1 = sume1 + rhosno * func_El(tmelts,ts(layer) - tp0) * dzs(layer)
+         sume1 = sume1 + rhosno * func_El(tmelts,ts(layer) - tp0) * dzs(layer) * ipsnow
       END DO
+
+! FD debug, restart variable
+      ti0(1:nlice) = ti(1:nlice)
+      ts0(1:nlsno) = ts(1:nlsno)
+      tsu0=tsu
+      hi0=hi
+      hs0=hs
+      dzi0(1:nlice) = dzi(1:nlice)
+      dzs0(1:nlsno) = dzs(1:nlsno)
 
 !
 !------------------------------------------------------------------------------
@@ -174,8 +190,8 @@ contains
       zkappa_s(nlsno)   = 2.d0*cond_sno*ztcond_i(0)/max(zeps, &
      &             (ztcond_i(0)*dzs(nlsno) + &
      &             cond_sno*dzi(1)))
-      zkappa_i(0)        = zkappa_s(nlsno)*dble(isnow)  &
-     &                     + zkappa_i(0)*(1.d0-dble(isnow))
+      zkappa_i(0)        = zkappa_s(nlsno)*dble(ipsnow)  &
+     &                     + zkappa_i(0)*(1.d0-dble(ipsnow))
 
 !
 !------------------------------------------------------------------------------|
@@ -194,7 +210,6 @@ contains
         END DO
         DO layer = 1, nlice
            ztiold(layer)    = ti(layer)
-           ti_old(layer)    = ztiold(layer)
         END DO
 
       nconv     =  0
@@ -248,7 +263,7 @@ contains
 !------------------------------------------------------------------------------|
 !
       tsu = min(tsu,tmelt)
-      imelt   = int(max(0.d0,sign(1.d0,tsu-tp0)))
+      ipmelt   = int(max(0.d0,sign(1.d0,tsu-tp0)))
       ! pressure of water vapor saturation (Pa)
       es         =  611.d0*10.d0**(9.5d0*(tsu-273.16d0)/(tsu-7.66d0))
       ! net longwave radiative flux
@@ -269,7 +284,7 @@ contains
      &              -(zrchu1+zrchu2*zssdqw)
       ! surface atmospheric net flux
           zf     =  fac_transmi * swrad + netlw + fsens + flat
-      
+
 !
 !------------------------------------------------------------------------------|
 !  8) tridiagonal system terms                                                 |
@@ -309,7 +324,7 @@ contains
      &                   + zkappa_i(nlice)*zg1 &
      &                   *tbo )
 
-      IF (hs.GT.0.0) THEN
+      IF ( hs > hslim ) THEN
 !
 !------------------------------------------------------------------------------|
 !  snow-covered cells                                                          |
@@ -332,7 +347,7 @@ contains
          zindterm(nlsno+2)   =  zindterm(nlsno+2) + zkappa_i(1) * tbo 
       endif
 
-      IF (tsu.LT.tp0) THEN
+      IF (tsu.LT.tmelt) THEN
 !
 !------------------------------------------------------------------------------|
 !  case 1 : no surface melting - snow present                                  |
@@ -378,7 +393,7 @@ contains
 !  cells without snow                                                          |
 !------------------------------------------------------------------------------|
 !
-      IF (tsu.lt.tp0) THEN
+      IF (tsu.lt.tmelt) THEN
 !
 !------------------------------------------------------------------------------|
 !  case 3 : no surface melting - no snow                                       |
@@ -476,7 +491,7 @@ contains
       end do
 
       ! snow temperatures      
-      if (hs.gt.0.0) then
+      if ( hs > hslim ) then
       ts(nlsno)  =  (zindtbis(nlsno+1) - ztrid(nlsno+1,3)* &
      &                     ti(1))/zdiagbis(nlsno+1)
           if (nlsno.gt.1) then 
@@ -491,8 +506,8 @@ contains
       ! surface temperature
       if (tsu.lt.tmelt) then
          tsu =  ( zindtbis(numeqmin) - ztrid(numeqmin,3)* &
-     &                  ( dble(isnow)*ts(1) +             &
-     &                  (1.d0-dble(isnow))*ti(1) ) ) /     &
+     &                  ( dble(ipsnow)*ts(1) +             &
+     &                  (1.d0-dble(ipsnow))*ti(1) ) ) /     &
      &                  zdiagbis(numeqmin)
       endif
 !
@@ -527,8 +542,8 @@ contains
 !
 
       ! surface conduction flux
-      fcsu    =  - dble(isnow)*zkappa_s(0)*zg1s*(ts(1) - tsu)  &
-     &            - (1.d0-dble(isnow))*zkappa_i(0)*zg1*         &
+      fcsu    =  - dble(ipsnow)*zkappa_s(0)*zg1s*(ts(1) - tsu)  &
+     &            - (1.d0-dble(ipsnow))*zkappa_i(0)*zg1*         &
      &            (ti(1) - tsu)
 
       ! bottom conduction flux
@@ -537,17 +552,17 @@ contains
 
       ! internal conduction fluxes : snow
       !--upper snow value
-      hfc_s(0) = - isnow* &
+      hfc_s(0) = - ipsnow* &
      &             zkappa_s(0) * zg1s * ( ts(1) - tsu )
       !--basal snow value
-      hfc_s(1) = - isnow* &
+      hfc_s(1) = - ipsnow* &
      &             zkappa_s(1) * ( ti(1) - ts(1) )
 
       ! internal conduction fluxes : ice
       !--upper layer
-      hfc_i(0) =  - isnow * &   ! interface flux if there is snow
+      hfc_i(0) =  - ipsnow * &   ! interface flux if there is snow
      &         ( zkappa_i(0)  * ( ti(1) - ts(nlsno ) ) ) &
-     &         - ( 1.0 - isnow ) * ( zkappa_i(0) * &
+     &         - ( 1.0 - ipsnow ) * ( zkappa_i(0) * &
      &           zg1 * ( ti(1) - tsu ) ) ! upper flux if no
       !--internal ice layers
       DO layer = 1, nlice - 1
@@ -559,9 +574,9 @@ contains
 
       ! case of only one layer in the ice
       IF (nlice.EQ.1) THEN
-         fcsu = -dble(isnow)*(zkappa_s(0)*(zg1s*(ts(1)- &
+         fcsu = -dble(ipsnow)*(zkappa_s(0)*(zg1s*(ts(1)- &
      &                         tsu))) &
-     &           -(1.d0-dble(isnow))*zkappa_i(0)*zg1  *(ti(1) - tsu)
+     &           -(1.d0-dble(ipsnow))*zkappa_i(0)*zg1  *(ti(1) - tsu)
          fcbo = -zkappa_i(nlice)*zg1* (tbo-ti(nlice))
       ENDIF
 !
@@ -586,7 +601,7 @@ contains
         dsume = dsume + swradab_i(layer)
       enddo
       do layer=1,nlsno
-        dsume = dsume + swradab_s(layer)
+        dsume = dsume + swradab_s(layer) * ipsnow ! FD
       enddo
 
       ! ice energy of melting
@@ -728,7 +743,7 @@ contains
 !
       z_f_surf  = netlw + flat + fsens - fcsu + fac_transmi * swrad
       z_f_surf  = MAX(0.d0, z_f_surf)
-      z_f_surf  = z_f_surf * MAX(0.d0, SIGN(1.d0,tsu-tmelt))
+     if (tsu < tmelt ) z_f_surf  = 0.d0
 
       IF ( ln_write ) THEN
          WRITE(numout,*) ' Available heat for surface ablation ... '
@@ -757,7 +772,7 @@ contains
 ! FD      zqt_s_ini = qs(1) * hs
       zqt_s_ini = 0.d0
       DO layer = 1, nlsno !in case of melting of more than 1 layer
-         zqt_s_ini = zqt_s_ini + qs(layer) * dzs(layer)
+         zqt_s_ini = zqt_s_ini + qs(layer) * dzs(layer) * ipsnow ! FD
       ENDDO
 
       IF ( ln_write ) THEN
@@ -775,17 +790,21 @@ contains
       dh_s_prec    =  snowfall * dtice
       dh_s_melt    =  0.d0
       zqprec       =  rhosno * ( cp_ice * ( tp0 - tair ) + mlfus )
-
+! FD check for tair < tp0
+      if (tair > tp0 ) then
+          snowfall = 0.d0
+         dh_s_prec = 0.d0
+      endif
       ! Conservation update
       zqt_s_ini    =  zqt_s_ini + zqprec * snowfall * dtice
-      fprecip      =  - zqprec * snowfall
+      fprecip      =  - zqprec * snowfall * ipsnow ! FD
 ! FD debug energy
       dsume = dsume + fprecip
 
       IF ( ln_write ) THEN
          WRITE(numout,*) ' snow falls! '
          WRITE(numout,*) ' dh_s_prec : ', dh_s_prec
-         WRITE(numout,*) ' flux of h : ', zqprec*snowfall
+         WRITE(numout,*) ' flux of h : ', -fprecip
 ! FD         WRITE(numout,*) ' zqt_s_ini : ', zqt_s_ini / dtice
          WRITE(numout,*)
       ENDIF
@@ -799,17 +818,18 @@ contains
       IF ( ln_write ) WRITE(numout,*) ' zqfont_su : ', zqfont_su / dtice 
 
       zdeltah(1)       =  MIN( 0.d0 , - zqfont_su / MAX( zqprec , zeps ) )
-      zqfont_su        =  MAX( 0.d0 , - dh_s_prec - zdeltah(1) ) * zqprec
+      zqfont_su        =  MAX( 0.d0 , - dh_s_prec  * ipsnow - zdeltah(1) ) * zqprec ! FD
       zdeltah(1)       =  MAX( - dh_s_prec, zdeltah(1) )
-      dh_s_melt        =  dh_s_melt + zdeltah(1)
+      dh_s_melt        =  dh_s_melt + zdeltah(1) * ipsnow ! FD
 
       ! Melt of snow
       DO layer = 1, nlsno !in case of melting of more than 1 layer
-         zdeltah(layer) =  - zqfont_su / qs(layer)
-         zqfont_su      = MAX( 0.d0, - dzs(layer) - zdeltah(layer) ) * qs(layer)
+         zdeltah(layer) =  - zqfont_su / MAX(zeps, qs(layer) )
+         zqfont_su      = MAX( 0.d0, - dzs(layer) * ipsnow - zdeltah(layer) ) * qs(layer)
          zdeltah(layer) = MAX( zdeltah(layer), - dzs(layer) )
-         dh_s_melt      =  dh_s_melt + zdeltah(layer) !resulting melt of snow    
+         dh_s_melt      =  dh_s_melt + zdeltah(layer) * ipsnow !resulting melt of snow    !FD
       END DO
+      IF ( ln_write ) WRITE(numout,*) ' dh_s_melt : ', dh_s_melt 
       dhs     =  dh_s_melt + dh_s_prec
 
       ! old and new snow thicknesses
@@ -1155,7 +1175,7 @@ contains
       LOGICAL ln_con
       double precision zqt_s_ini,zqt_i_ini,zqt_s_fin,zqt_i_fin,zqt_ini,zqt_fin
       double precision zfmelt
-      integer snind, icsuswi, icboind, snswi, icboswi, snicswi, icsuind, isnow
+      integer snind, icsuswi, icboind, snswi, icboswi, snicswi, icsuind
       integer snicind
       double precision deltah, zqsnow, zdeltah, zhsnow
       double precision s_i_snic, zsh_i_new, z_ms_i_ini
@@ -1218,10 +1238,11 @@ contains
          ENDIF
          deltah = deltah + dzs(layer)
       END DO
+      snind = snind * ipsnow ! FD
 
       ! snswi : switch which value equals 1 if snow melts
       !                                 0 if not
-      snswi    =  MAX(0,INT(-dhs/MAX(zeps,ABS(dhs))))
+      snswi    =  MAX(0,INT(-dhs/MAX(zeps,ABS(dhs)))) * ipsnow ! FD
 
       ! ice surface behaviour : computation of icsuind-icsuswi
       ! icsuind : index which values equals 0 if there is nothing
@@ -1297,6 +1318,7 @@ contains
       !                              !
       !------------------------------!
 
+  if (ipsnow == 1 .and. hs > 1d-12 ) then
 !
 !------------------------------------------------------------------------------|
 !      S-1) 'Old' snow cotes
@@ -1308,7 +1330,7 @@ contains
 
       ! indexes of the vectors
       ntop0    =  1
-      nbot0    =  nlsno+1-snind+(1-snicind)*snicswi
+      nbot0    =  nlsno+1- snind+(1-snicind)*snicswi
 
       ! cotes of the top of the layers
       zs(0)   =  0.d0
@@ -1338,7 +1360,7 @@ contains
 !
       ! enthalpies
       zqh_s0(1) =  rhosno * ( cp_ice * ( tp0 - (1 - snswi) * tair - & ! fallen snow
-     &             snswi * ts(1) ) + mlfus )* zthick0(1) 
+     &             snswi * ts(1) ) + mlfus )* zthick0(1)
       zqt_s_ini = zqt_s_ini + zqh_s0(1)
 
       DO layer = 2, nbot0 ! remaining snow
@@ -1347,7 +1369,6 @@ contains
          zqh_s0(layer) = rhosno*( cp_ice*(tp0 - ts(limsum)) + mlfus) * zthick0(layer)
          zswitch   = 1.d0 - MAX (0.d0, SIGN ( 1.d0, zeps - hs ) )
          zqt_s_ini = zqt_s_ini + ( 1 - snswi ) * zqh_s0(layer) * zswitch
-! FD         WRITE(numout,*) 'limsum : ', limsum
       END DO
       zqt_ini = zqt_s_ini
 
@@ -1408,19 +1429,13 @@ contains
 !      S-5) Recover snow temperature
 !------------------------------------------------------------------------------|
 !
-! FD pb with sign function      isnow   = INT( 1.d0 - MAX( 0.d0 , SIGN( 1.d0 , - hs ) ) )
-      if ( hs > 0.d0 ) then 
-        isnow = 1
-      else
-        isnow = 0
-      endif
       DO layer = 1, nlsno
-         ts(layer)  =  isnow * ( tp0 - ( zqh_s1(layer) / rhosno/ &
+         ts(layer)  =  ipsnow * ( tp0 - ( zqh_s1(layer) / rhosno/ &
      &                       MAX( dzs(layer) , zeps ) - mlfus )  &
      &                       / cp_ice ) +                        &
-     &                       ( 1.d0 - isnow ) * tp0
+     &                       ( 1.d0 - ipsnow ) * tp0
          zqt_s_fin = zqt_s_fin + zqh_s1(layer)
-         qs(layer) = isnow * zqh_s1(layer) / MAX( dzs(layer) , zeps )
+         qs(layer) = ipsnow * zqh_s1(layer) / MAX( dzs(layer) , zeps )
       END DO
       zqt_fin = zqt_s_fin
 
@@ -1432,6 +1447,34 @@ contains
          WRITE(numout,*)
       ENDIF
 
+  else
+!
+!------------------------------------------------------------------------------|
+!      S-3) New snow grid
+!------------------------------------------------------------------------------|
+!
+      ! indexes of the vectors
+      ntop1    =  1
+      nbot1    =  nlsno
+
+      ! cotes and thicknesses
+         DO layer = 1, nlsno
+            dzs(layer) = hs / dble(nlsno)
+         END DO
+         zs(1)  = dzs(1) / 2.d0
+         DO layer = 2, nlsno
+            zs(layer)  = zs(layer-1) + ( dzs(layer-1) + dzs(layer) ) / 2.d0
+         END DO
+         DO layer = 1, nlsno
+            ts(layer) = tsu
+         ENDDO
+
+         IF ( ln_write ) THEN
+            WRITE(numout,*) ' dzs : ', ( dzs(layer), layer = 1, nlsno )
+            WRITE(numout,*) ' zs  : ', (  zs(layer), layer = 1, nlsno )
+         ENDIF
+
+  endif ! ipsnow == 1 FD
 !------------------------------------------------------------------------------!
  
       !------------------------------!
@@ -1692,24 +1735,24 @@ contains
       END DO
       DO layer = 1, nlsno
          tmelts = 0.d0
-         sume2 = sume2 + rhosno * func_El(tmelts,ts(layer) - tp0) * dzs(layer)
+         sume2 = sume2 + rhosno * func_El(tmelts,ts(layer) - tp0) * dzs(layer) * ipsnow ! FD
       END DO
 ! FD debug energy
       write(*,*) 'debug energy',dsume * dtice, sume2 - sume1, sume1
-      if ( abs(dsume*dtice-sume2+sume1) .gt. 1d5 ) then
-          call flush(numout)
-          call flush(6)
-       OPEN(1,file='restart.dat')
-       WRITE(1,*) nlice,nlsno
-       WRITE(1,*) ti(1:nlice),ts(1:nlsno),tsu,tbo
-       WRITE(1,*) si(1:nlice)
-       WRITE(1,*) hi,hs
-       WRITE(1,*) dzi(1:nlice),dzs(1:nlsno)
-       WRITE(1,*) snowfall,dwnlw,tsu,tair,qair,uair,swrad,oceflx
-       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
-       CLOSE(1)
-          stop 'energy cons pb'
-      endif
+!      if ( abs(dsume*dtice-sume2+sume1) .gt. 1d4 .or. ts(1) .gt. tp0 ) then
+!          call flush(numout)
+!          call flush(6)
+!       OPEN(1,file='restart.dat')
+!       WRITE(1,*) nlice,nlsno
+!       WRITE(1,*) ti0(1:nlice),ts0(1:nlsno),tsu0,tbo
+!       WRITE(1,*) si(1:nlice)
+!       WRITE(1,*) hi0,hs0
+!       WRITE(1,*) dzi0(1:nlice),dzs0(1:nlsno)
+!       WRITE(1,*) snowfall,dwnlw,tsu0,tair,qair,uair,swrad,oceflx
+!       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
+!       CLOSE(1)
+!          stop 'energy cons pb'
+!      endif
 
 !-------------------------------------------------------------------------------
 ! Fin de la routine ice_th_remap
