@@ -581,9 +581,8 @@ k=lice_top
       w2=wmesh(k  )*re(k)*dtice
       rhs(k  ) =  rhs(k  ) - w2 * em(k) ! add back
 
-      efus = cp_wat * tme(k)               ! correct even for snow because we consider
-                                        ! the energy after melt (would be zero)
-      sum0 = ( em(k) - efus ) * re(k) * dtice
+      tinew(k) = tme(k) ! keep top surface temperature at melt point
+      sum0 = em(k) * re(k) * dtice
       rhs(k) =  rhs(k) - diag(k) * ( tinew(k) - tiold(k) )
       diag(k)= - sum0
 
