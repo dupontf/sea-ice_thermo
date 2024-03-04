@@ -110,14 +110,13 @@ subroutine init_sigma_ice_FE
 
   do k=1,ni
        tt1 = ti(ni-k+1)-tzero
-       tt2 = min(tt1,-1d-16)
-       qm(k)= cp_ice * ( tme(k) - tt1 ) + mlfus * ( 1.d0 - tme(k)/tt2 )
-       em(k)= - qm(k) + cp_wat * tme(k)
+       qm(k) = func_qmelt(tme(k),tt1)
+       em(k) = func_el(tme(k),tt1)
   enddo
   do k=ni+1,ns
        tt1 = ts(ns-k+1)-tzero
-       qm(k)= cp_ice * ( tme(k) - tt1 ) + mlfus
-       em(k)= - qm(k) + cp_wat * tme(k)
+       qm(k) = func_qmelt(tme(k),tt1)
+       em(k) = func_el(tme(k),tt1)
   enddo
 
   call invert_energy_all(ns,em,tiold,sali)
@@ -174,9 +173,6 @@ subroutine ice_thermo_FE(dtice)
   double precision,save :: latsub = 2.834d6        ! J/kg latent heat of sublimation
   double precision,save :: mlfus = 0.334d6        ! J/kg latent heat of fusion
 
-  double precision,save :: tcice   = 2.04d0        ! ice conductivity
-  double precision,save :: tcsnow  = 0.31d0        ! snow conductivity
-
 
   double precision, parameter :: StefanBoltzman = 5.67d-8
 
@@ -211,11 +207,13 @@ subroutine ice_thermo_FE(dtice)
   integer, dimension(maxlay) :: p_res
 
   logical fixed_tb,melt_ts,melt_tb,panic
-  integer :: iteration, maxiter = 500
+  integer :: iteration, maxiter = 50
   double precision ftot2, sume2, flux2, pi, energy_snow_melt, &
             sublimation_speed, bottom_speed, rom
   logical :: energy_check=.false., thin_snow_active, debug=.false.
-  double precision :: tseafrz
+  double precision :: tseafrz, sumrad
+      double precision :: hslim=0.0005d0
+
 
 !FD debug
 energy_check=.true.
@@ -243,19 +241,9 @@ debug=.true.
 ! set the conductivity in material
 !---------------------------------------------------------------------
 
-  kice(1:ni)=tcice
-  kice(ni+1:ns)=tcsnow
+  kice(1:ni)   =cond_ice
+  kice(ni+1:ns)=cond_sno
 
-!---------------------------------------------------------------------
-! set the radiative transfer (already in W/m2)
-!---------------------------------------------------------------------
-
-      DO k=ns,ni+1,-1
-         Rad(k) = swradab_s(ns-k+1)
-      ENDDO
-      DO k=ni,1,-1
-         Rad(k) = swradab_i(ni-k+1)
-      ENDDO
 !---------------------------------------------------------------------
 ! set to zero some integrable quantities
 !---------------------------------------------------------------------
@@ -290,15 +278,20 @@ debug=.true.
 !---------------------------------------------------------------------
 
   do k=1,ni
-! FD debug     sali(k)=si(ni-k+1)
-     sali(k)=4.d0
+     sali(k) = si(ni-k+1)
   enddo
   DO k=ni+1,ns
-     sali(k) = 0d0
+     sali(k) = 0.d0
   ENDDO
 
   do k=1,ns
      tme(k)=Tfreeze1(sali(k))
+  enddo
+
+  do k=1,ni
+!   tt = 0.25d0*(tiold(k-1)+tinew(k-1)+tiold(k)+tinew(k))
+   tt = 0.5d0*(tiold(k-1)+tiold(k)) ! both LIM3 and Huwald are not doing any fancier, so why not doing the same?
+   kice(k) = func_ki(sali(k),tt)      ! this can be move up and out of the iteration loop.
   enddo
 
 !---------------------------------------------------------------------
@@ -327,9 +320,24 @@ debug=.true.
 !---------------------------------------------------------------------
 
   lice_top=ni
-  if (hsold > hminice) then
+  if (hsold > hslim ) then
     lice_top=ns
   endif
+
+!---------------------------------------------------------------------
+! set the radiative transfer (already in W/m2)
+!---------------------------------------------------------------------
+
+      sumrad=0.d0
+      DO k=lice_top,ni+1,-1
+         Rad(k) = swradab_s(ns-k+1)
+      ENDDO
+      DO k=ni,1,-1
+         Rad(k) = swradab_i(ni-k+1)
+      ENDDO
+      do k=1,lice_top
+         sumrad = sumrad + rad(k)
+      enddo
 
 !---------------------------------------------------------------------
 ! pointer for remapping
@@ -348,9 +356,8 @@ debug=.true.
 
      do k=1,ns
        tt1 = 0.5d0*(tiold(k-1)+tiold(k))
-       tt2 = min(tt1,-1d-16)
-       qm(k)= cp_ice * ( tme(k) - tt1 ) + mlfus * ( 1.d0 - tme(k)/tt2 )
-       em(k)= - qm(k) + cp_wat * tme(k)
+       qm(k) = func_qmelt(tme(k),tt1)
+       em(k) = func_el(tme(k),tt1)
      enddo
 
 !---------------------------------------------------------------------
@@ -383,8 +390,13 @@ if (debug) write(*,*) 'Fnet',Fnet,fac_transmi*swrad,netlw,fsens,flat,qair,q0,tai
 !---------------------------------------------------------------------
 ! accumulation at the surface
 !---------------------------------------------------------------------
-     snow_precip = snowfall
-     rain_precip = 0.d0
+     if (tair < tzero ) then
+      snow_precip = snowfall
+      rain_precip = 0.d0
+     else
+      snow_precip = 0.d0
+      rain_precip = snowfall * rhosno / rhowat
+     endif
 
    fwf = fwf + rain_precip ! add liquid precipitation to the freshwater flux to ocean
 
@@ -392,7 +404,7 @@ if (debug) write(*,*) 'Fnet',Fnet,fac_transmi*swrad,netlw,fsens,flat,qair,q0,tai
 ! need to get rid of snow if too thin during melting/sublimating
 ! thin snow case
 !---------------------------------------------------------------------
-  if ( hsold <= hminice ) then
+  if ( hsold <= hslim ) then
 
 ! then 1- compute total energy in snow
 !      2- if Fnet>0, we assume that we can use some of the heat flux to melt the thin snow
@@ -406,7 +418,11 @@ if (debug) write(*,*) 'Fnet',Fnet,fac_transmi*swrad,netlw,fsens,flat,qair,q0,tai
     if ( Fnet > 0.d0 ) then ! use Fnet if positive
 
       energy_snow_melt = min( - sume2, Fnet * dtice )! energy (negative) required to melt the thin snow (in entirity if Fnet large enough)
-      dhs =  - energy_snow_melt / sume2 * hsold ! melted snow thickness
+      if ( hsold > 0.d0 ) then
+       dhs =  - energy_snow_melt / sume2 * hsold ! melted snow thickness
+      else
+       dhs = 0.d0
+      endif
       fwf = fwf + dhs / dtice / rhowat * rhosno
       dhs = snow_precip * dtice - dhs
 
@@ -414,7 +430,11 @@ if (debug) write(*,*) 'Fnet',Fnet,fac_transmi*swrad,netlw,fsens,flat,qair,q0,tai
 
       sume2 = sume2 - latvap * re(k) * hsold ! the snow needs to be sublimated, so the total required energy of melting is higher!
       dq = max( sume2, flat * dtice * snosub ) ! negative energy required to sublimate the thin snow (in entirity if flat large enough, partial otherwise)
-      dhs = snow_precip * dtice - dq / sume2 * hsold
+      if ( hsold > 0.d0 ) then
+       dhs = snow_precip * dtice - dq / sume2 * hsold
+      else
+       dhs = snow_precip * dtice
+      endif
       ! recalculate the top flux
       Flat =  Flat - dq / dtice ! (-dq>0 so this is in effect reducing the latent heat)
       Fnet =  Fnet - dq / dtice ! (-dq>0 so this is in effect reducing the latent heat)
@@ -508,8 +528,6 @@ if (debug) write(*,*) 'topflux',topflux,' botflux',-bshf
      goto 2000 ! finalize and leave
   endif
 
-! FD debug
-  write(*,'(i4,20(1x,e10.3))') 0,tiold(0:lice_top)
 !---------------------------------------------------------------------
  do iteration = 1, maxiter ! convergence on temperature and wmesh
 
@@ -519,19 +537,19 @@ if (debug) write(*,*) 'topflux',topflux,' botflux',-bshf
   diag=0.d0
   cm=0.d0
 
-
   do k=1,lice_top
     tt = 0.25d0*(tiold(k-1)+tinew(k-1)+tiold(k)+tinew(k))
     tt1 = 0.5d0*(tiold(k-1)+tiold(k))
     tt2 = 0.5d0*(tinew(k-1)+tinew(k))
-    capa = min( cp_ice - mlfus * tme(k) / (tt1*tt2), 1d7 )
+
+    capa = func_cp ( tme(k), tt1, tt2)
     cm(k)= capa ! needed?
     m1=he(k)*re(k)/3.d0*capa
     m2=he(k)*re(k)/6.d0*capa
-    k1=dtice/heold(k)*(kice(k)+0.117d0*si(k)/tt)
+    k1=dtice/heold(k)*kice(k)
     km(k)=k1 ! needed?
-    rhs(k-1) =  rhs(k-1) + k1 *( tiold(k)-tiold(k-1)) + 0.5d0 * rad(k)
-    rhs(k)   =  rhs(k)   - k1 *( tiold(k)-tiold(k-1)) + 0.5d0 * rad(k)
+    rhs(k-1) =  rhs(k-1) + k1 *( tiold(k)-tiold(k-1)) + 0.5d0 * rad(k) * dtice
+    rhs(k)   =  rhs(k)   - k1 *( tiold(k)-tiold(k-1)) + 0.5d0 * rad(k) * dtice
 
     w1=wmesh(k-1)*re(k)*dtice
     w2=wmesh(k  )*re(k)*dtice
@@ -605,9 +623,9 @@ k=lice_top
   if (.not.melt_ts) then
     efus = em(lice_top)
     flux2 = flux2 + sublimation_speed * re(lice_top) * efus
-  else
-    efus = cp_wat * tme(lice_top)
-    flux2 = flux2 - wmesh(lice_top) * re(lice_top) * efus
+! FD  else
+! FD    efus = cp_wat * tme(lice_top)
+! FD    flux2 = flux2 - wmesh(lice_top) * re(lice_top) * efus
   endif
 
 ! final combination
@@ -673,24 +691,34 @@ k=0
 !      if (xis > 1.d0 ) p_res(k) = -2             ! request for top degradation
 !   enddo
 
-   do k=1,lice_top-1
-      xib = -wmesh(k-1)*dtice/heold(k)
-      if (xib > 1.d0 ) p_res(k) = -1             ! request for bottom degradation
-   enddo
-   if (sum(p_res)<0) panic=.true.
+!   do k=1,lice_top-1
+!      xib = -wmesh(k-1)*dtice/heold(k)
+!      if (xib > 1.d0 ) p_res(k) = -1             ! request for bottom degradation
+!   enddo
+!   if (sum(p_res)<0) panic=.true.
 
 ! panic if more than one point above melting
-   do k=1,lice_top-1
-      if (tinew(k) > tme(k) ) panic=.true.
-   enddo
+!   do k=1,lice_top-2
+!      if (tinew(k) > tme(k) ) panic=.true.
+!   enddo
 
 ! FD need new condition for wmesh in snow and ice separately
 
     if (panic) then
      if (ns>2) then
 ! degrade to two layers (one for ice and one for snow)
-      call degrade_to_two_layers(&
-                lice_top,re,em,heold,tiold,sali,zi,dzi,p_remap,tme)
+!      call degrade_to_two_layers(&
+!                lice_top,re,em,heold,tiold,sali,zi,dzi,p_remap,tme)
+! FD debug
+       OPEN(1,file='restart.dat')
+       WRITE(1,*) nlice,nlsno
+       WRITE(1,*) tiold(0:nlice+nlsno)
+       WRITE(1,*) si(1:nlice)
+       WRITE(1,*) hi,hs
+       WRITE(1,*) snowfall,dwnlw,tsu,tair,qair,uair,swrad,oceflx,seasal
+       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
+       CLOSE(1)
+       STOP
      else
       call degrade_to_one_layer_uniform( &
              dtice,lice_top,&
@@ -712,13 +740,19 @@ k=0
 ! reset top melting to 'off' if velocity has the wrong sign
 !---------------------------------------------------------------------
 
-if ( melt_ts .and. wmesh(lice_top) < 0.d0 ) then
-  melt_ts = .false.
-  wmesh(lice_top)=-sublimation_speed
+if ( melt_ts ) then
   if ( lice_top==ns ) then
-    wmesh(lice_top)=-sublimation_speed-snow_precip
+     if ( wmesh(lice_top) < -snow_precip ) then
+       melt_ts = .false.
+       wmesh(lice_top)=-sublimation_speed-snow_precip
+     endif
+  else
+     if ( wmesh(lice_top) < 0.d0 ) then
+       melt_ts = .false.
+       wmesh(lice_top)=-sublimation_speed
+     endif
   endif
-  tinew(lice_top)=tme(lice_top)-0.01d0 ! add this condition for making sure that the convergence is not reached
+  if (.not.melt_ts) tinew(lice_top)=tme(lice_top)-0.01d0 ! add this condition for making sure that the convergence is not reached
 endif
 
 !---------------------------------------------------------------------
@@ -833,19 +867,24 @@ if (energy_check) then
 !print the top and bottom heat flux before accreation/deposition processes
 ! the two numbers should be equal in steady state.
  if (debug) then
-  write(*,*) 'ice heat flux',bshf,topflux,flux2,energy_snow_melt
-  write(*,*) 'hi,hs',hinew,hsnew
+  write(*,*) 'ice heat flux',bshf,topflux,flux2,energy_snow_melt/dtice,kice(ni)*(tinew(ni)-tinew(ni-1))/dzi(ni),kice(ni)
+  write(*,*) 'hi,hs',hinew,hsnew,dhs/dtice,-wmesh(ni),wmesh(0)
  endif
 ! plus surface adjustment for disappearing thin snow
-     ftot2 = dtice * ( topflux - bshf + flux2 ) - energy_snow_melt
+     ftot2 = dtice * ( topflux - bshf + flux2  + sumrad ) - energy_snow_melt
      sume2=0.d0
   do k=1,lice_top
     tt1 = 0.5d0*(tinew(k-1)+tinew(k))
-    qm(k)= cp_ice * ( tme(k) - tt1 ) + mlfus * ( 1.d0 - tme(k)/tt1 )
-    em(k)= - qm(k) + cp_wat * tme(k)
+    qm(k) = func_qmelt(tme(k),tt1)
+    em(k) = func_el(tme(k),tt1)
     sume2 = sume2 + he(k) * em(k) * re(k)
   enddo
-  write(*,*) 'ftot fina',ftot2,sume2-sume,iteration
+   fac=abs(ftot2-sume2+sume)
+  write(*,'(i4,20(1x,e10.3))') iteration,wmesh(0:ns)
+  write(*,'(i4,20(1x,e10.3))') iteration,tinew(0:ns)
+  write(*,*) 'ftot fina',ftot2,sume2-sume,iteration,fac
+   fac=abs(ftot2-sume2+sume)
+!  if (fac>1d0) stop 'too large error'
 endif
 
 2000 continue
@@ -881,17 +920,18 @@ if ( p_remap(1) > 1 ) then
 endif
 
 !---------------------------------------------------------------------
-if (debug) then
-  write(*,'(i4,20(1x,e10.3))') iteration,wmesh(0:ns)
-  write(*,'(i4,20(1x,e10.3))') iteration,tinew(0:ns)
-endif
+! FD debug
+!if (debug) then
+!  write(*,'(i4,20(1x,e10.3))') iteration,wmesh(0:ns)
+!  write(*,'(i4,20(1x,e10.3))') iteration,tinew(0:ns)
+!endif
 
    hi=hinew
    hs=hsnew
    
    sim=0.D0
    do k=1,lice_top
-      sim=si(k)*he(k)
+      sim=sali(k)*he(k)
    enddo
    if (hi>0.d0) sim=sim/hi
    
@@ -916,7 +956,7 @@ endif
        endif
       endif
 
- endif ! end of condition for hi > hminice
+ endif ! end of condition for hi > hslim
 
 !---------------------------------------------------------------------
 ! prepare for next iteration:
@@ -925,17 +965,27 @@ endif
     tiold = tinew
 
 ! convert back to LIM3
-     do k=1,ni
-       tt1 = 0.5d0*(tinew(k-1)+tinew(k))
-       ti(ni-k+1) = tt1 + tzero
-     enddo
+!     do k=1,ni
+!       tt1 = 0.5d0*(tinew(k-1)+tinew(k))
+!       ti(ni-k+1) = tt1 + tzero + 1d-2
+!     enddo
      do k=ni+1,ns
        tt1 = 0.5d0*(tinew(k-1)+tinew(k))
-       ti(ns-k+1) = tt1 + tzero
+       ts(ns-k+1) = tt1 + tzero + 1d-2
      enddo
-     tbo = tinew(0 ) + tzero
-     tsu = tinew(ns) + tzero
-
+     tbo = tinew(0 ) + tzero + 1d-2
+     tsu = tinew(ns) + tzero + 1d-2
+! FD keep the full FE solution for plotting reasons
+     do k=1,ni
+      ti(ni-k+1)=tinew(k-1) + tzero + 1d-2
+     enddo
+! call back for LIM3 of thickness (needed for radiative transfer)
+     do k=1,ni
+       dzi(ni-k+1) = dziold(k) * hi
+     enddo
+     do k=ni+1,ns
+       dzs(ns-k+1) = dziold(k) * hs
+     enddo
 !write(*,*) 'ice heat flux',bshf
 
 
