@@ -286,7 +286,7 @@ hslim=0.0005d0
       ! surface atmospheric net flux
           zf     =  fac_transmi * swrad + netlw + fsens + flat
 ! FD debug
-write(*,*) 'atmo flux during nonlinear conv',zf
+!write(*,*) 'atmo flux during nonlinear conv',zf
 
 !
 !------------------------------------------------------------------------------|
@@ -527,6 +527,8 @@ write(*,*) 'atmo flux during nonlinear conv',zf
          ztmelt_i         =  min(-fracsal*si(layer) + tp0, 273.149999999d0) 
          ti(layer)  =  min(ti(layer),ztmelt_i)
       END DO
+! FD debug
+!write(*,*) 'diff ti/ts',tsu-tp0,ts(1:nlsno)-tp0,ti(1:nlice)-tp0
 
       ! zerrit is a residual which has to be under zerrmax
       zerrit   =  ABS(tsu-ztsutemp)            
@@ -537,7 +539,6 @@ write(*,*) 'atmo flux during nonlinear conv',zf
          zerrit  =  max(zerrit,abs(ti(layer) - ztitemp(layer)))
       END DO
 
-      END DO
 !
 !--------------------------------------------------------------------------
 !   11) Heat conduction fluxes                                            |
@@ -552,6 +553,14 @@ write(*,*) 'atmo flux during nonlinear conv',zf
       ! bottom conduction flux
       fcbo  =  - zkappa_i(nlice)* &
      &            ( zg1*(tbo - ti(nlice)) )
+
+! FD mechanism for refreezing the surface
+zf=zf+dzf*(tsu-ztsutemp)
+if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
+! FD debug
+!write(*,*) 'diff fcsu',fcsu,zf,zf-fcsu
+
+      END DO ! FD end of nonlinear convergence
 
       ! internal conduction fluxes : snow
       !--upper snow value
@@ -616,7 +625,7 @@ write(*,*) 'atmo flux during nonlinear conv',zf
       do layer=1,nlsno
         dsume = dsume + swradab_s(layer) * ipsnow ! FD
       enddo
-write(*,*) 'debug energy after diff',sume3,sume3-sume1,dtice*dsume
+!write(*,*) 'debug energy after diff',sume3,sume3-sume1,dtice*dsume
 
       do layer=1,nlice
         dsume = dsume + swradab_i(layer)
@@ -821,7 +830,7 @@ write(*,*) 'debug energy after diff',sume3,sume3-sume1,dtice*dsume
       dh_s_melt    =  0.d0
       zqprec       =  rhosno * ( cp_ice * ( tp0 - tair ) + mlfus )
 ! FD check for tair < tp0
-      if (tair > tp0 .and. z_f_surf == 0.d0 ) then
+      if (tair > tp0 .or. z_f_surf > 0.d0 ) then
           snowfall = 0.d0
          dh_s_prec = 0.d0
       endif
@@ -1600,7 +1609,8 @@ write(*,*) 'debug energy after diff',sume3,sume3-sume1,dtice*dsume
       END DO
 
       zqt_ini = zqt_ini + zqt_i_ini ! includes zqsnic and zqsnow
-write(*,*) 'debug energy avant remap',-zqt_ini,-zqt_ini-sume1,dsume*dtice
+! FD debug
+! write(*,*) 'debug energy avant remap',-zqt_ini,-zqt_ini-sume1,dsume*dtice
 
 !
 !------------------------------------------------------------------------------|
