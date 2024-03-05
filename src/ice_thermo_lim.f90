@@ -317,19 +317,16 @@ write(*,*) zspeche_i(nlice)
       DO numeq = nlsno + 2, nlsno + nlice 
            layer = numeq - nlsno - 1
            ztrid(numeq,1)   =  - zkappa_i(layer-1) 
-           ztrid(numeq,2)   =  rhoice * dzi(layer) * zspeche_i(layer) / dtice &
-     &                      + zkappa_i(layer-1) + zkappa_i(layer)
+           ztrid(numeq,2)   =  zeta_i(layer) + zkappa_i(layer-1) + zkappa_i(layer)
            ztrid(numeq,3)   =  - zkappa_i(layer)
-           zindterm(numeq)  =  rhoice * dzi(layer) * zspeche_i(layer) / dtice * ztiold(layer) + swradab_i(layer)
+           zindterm(numeq)  =  zeta_i(layer) * ztiold(layer) + swradab_i(layer)
       END DO
       ! ice bottom terms
       numeq   =  nlsno + nlice + 1
       ztrid(numeq,1)  =  - zkappa_i(nlice-1)   
-      ztrid(numeq,2)  =  rhoice * dzi(nlice) * zspeche_i(nlice) / dtice & 
-     &                 + ( zkappa_i(nlice)*zg1 &
-     &                   + zkappa_i(nlice-1) )
+      ztrid(numeq,2)  =  zeta_i(nlice) + zkappa_i(nlice)*zg1 + zkappa_i(nlice-1)
       ztrid(numeq,3)  =  0.d0
-      zindterm(numeq) =  rhoice * dzi(nlice) * zspeche_i(nlice) / dtice * ztiold(nlice) + &
+      zindterm(numeq) =  zeta_i(nlice) * ztiold(nlice) + &
      &                   ( swradab_i(nlice) &
      &                   + zkappa_i(nlice)*zg1 &
      &                   *tbo )
@@ -344,10 +341,9 @@ write(*,*) zspeche_i(nlice)
       do numeq = 3, nlsno + 1
            layer =  numeq - 1
            ztrid(numeq,1)   =  - zkappa_s(layer-1)
-           ztrid(numeq,2)   =  rhosno * cp_ice * dzs(layer) / dtice & 
-     &                         + zkappa_s(layer-1) + zkappa_s(layer)
+           ztrid(numeq,2)   =  zeta_s(layer) + zkappa_s(layer-1) + zkappa_s(layer)
            ztrid(numeq,3)   =  - zkappa_s(layer)
-           zindterm(numeq)  =  rhosno * cp_ice * dzs(layer) / dtice * ztsold(layer) + swradab_s(layer)
+           zindterm(numeq)  =  zeta_s(layer) * ztsold(layer) + swradab_s(layer)
       end do
       
       ! case of only one layer in the ice (ice equation is altered)
@@ -369,14 +365,14 @@ write(*,*) zspeche_i(nlice)
       ! surface equation
       ztrid(1,1) = 0.d0
       ztrid(1,2) = dzf - zg1s*zkappa_s(0)
-      ztrid(1,3) = zg1s*zkappa_s(0)
-      zindterm(1) = dzf*tsu - zf
+      ztrid(1,3) = zg1s * zkappa_s(0)
+      zindterm(1) = dzf * tsu - zf
 
       ! first layer of snow equation
       ztrid(2,1)  =  - zkappa_s(0)*zg1s
-      ztrid(2,2)  =  rhosno * cp_ice * dzs(1) / dtice + zkappa_s(1) + zkappa_s(0)*zg1s
+      ztrid(2,2)  =  zeta_s(1) + zkappa_s(1) + zkappa_s(0)*zg1s
       ztrid(2,3)  =  - zkappa_s(1)
-      zindterm(2) =  rhosno * cp_ice * dzs(1) / dtice * ztsold(1) + swradab_s(1)
+      zindterm(2) =  zeta_s(1) * ztsold(1) + swradab_s(1)
 
       else
 !
@@ -390,9 +386,9 @@ write(*,*) zspeche_i(nlice)
 
       ! first layer of snow equation
       ztrid(2,1)  =  0.d0
-      ztrid(2,2)  =  rhosno * cp_ice * dzs(1) / dtice + zkappa_s(1) + zkappa_s(0)*zg1s
+      ztrid(2,2)  =  zeta_s(1) + zkappa_s(1) + zkappa_s(0)*zg1s
       ztrid(2,3)  =  - zkappa_s(1)
-      zindterm(2) =  rhosno * cp_ice * dzs(1) / dtice * ztsold(1) + swradab_s(1) + zkappa_s(0)* zg1s * tsu
+      zindterm(2) =  zeta_s(1) * ztsold(1) + swradab_s(1) + zkappa_s(0)* zg1s * tsu
 
       ENDIF
       ELSE
@@ -419,9 +415,9 @@ write(*,*) zspeche_i(nlice)
 
       ! first layer of ice equation
       ztrid(numeqmin+1,1) =  - zkappa_i(0)*zg1
-      ztrid(numeqmin+1,2) =  rhoice * dzi(1) * zspeche_i(1) / dtice + zkappa_i(1) + zkappa_i(0) * zg1
+      ztrid(numeqmin+1,2) =  zeta_i(1) + zkappa_i(1) + zkappa_i(0) * zg1
       ztrid(numeqmin+1,3) =  - zkappa_i(1)  
-      zindterm(numeqmin+1)=  rhoice * dzi(1) * zspeche_i(1) / dtice * ztiold(1) + swradab_i(1)
+      zindterm(numeqmin+1)=  zeta_i(1) * ztiold(1) + swradab_i(1)
 
       ! case of only one layer in the ice (surface & ice equations are altered)
       if (nlice.eq.1) then
@@ -430,10 +426,10 @@ write(*,*) zspeche_i(nlice)
       ztrid(numeqmin,3)    =  zkappa_i(0)*2.d0
 
       ztrid(numeqmin+1,1)  =  -zkappa_i(0)*2.d0
-      ztrid(numeqmin+1,2)  =  rhoice * dzi(1) * zspeche_i(1) / dtice + zkappa_i(0)*2.d0 + zkappa_i(1)
+      ztrid(numeqmin+1,2)  =  zeta_i(1) + zkappa_i(0)*2.d0 + zkappa_i(1)
       ztrid(numeqmin+1,3)  =  0.d0
 
-      zindterm(numeqmin+1) =  rhoice * dzi(1) * zspeche_i(1) / dtice * ztiold(1) + swradab_i(1) + zkappa_i(1)*tbo
+      zindterm(numeqmin+1) =  zeta_i(1) * ztiold(1) + swradab_i(1) + zkappa_i(1)*tbo
       endif
 
       else
@@ -448,16 +444,16 @@ write(*,*) zspeche_i(nlice)
 
       ! first layer of ice equation
       ztrid(numeqmin,1) =  0.d0
-      ztrid(numeqmin,2) =  rhoice * dzi(1) * zspeche_i(1) / dtice + zkappa_i(1) + zkappa_i(0) * zg1
+      ztrid(numeqmin,2) =  zeta_i(1) + zkappa_i(1) + zkappa_i(0) * zg1
       ztrid(numeqmin,3) =  - zkappa_i(1)
-      zindterm(numeqmin)  =  rhoice * dzi(1) * zspeche_i(1) / dtice * ztiold(1) + swradab_i(1) + zkappa_i(0)*zg1*tsu
+      zindterm(numeqmin)  =  zeta_i(1) * ztiold(1) + swradab_i(1) + zkappa_i(0)*zg1*tsu
 
       ! case of only one layer in the ice (surface & ice equations are altered)
       if (nlice.eq.1) then
          ztrid(numeqmin,1)  =  0.d0
-         ztrid(numeqmin,2)  =  rhoice * dzi(1) * zspeche_i(1) / dtice + zkappa_i(0)*2.d0 + zkappa_i(1)
+         ztrid(numeqmin,2)  =  zeta_i(1) + zkappa_i(0)*2.d0 + zkappa_i(1)
          ztrid(numeqmin,3)  =  0.d0
-         zindterm(numeqmin) =  rhoice * dzi(1) * zspeche_i(1) / dtice * ztiold(1) + &
+         zindterm(numeqmin) =  zeta_i(1) * ztiold(1) + &
      &                         (swradab_i(1)                      &
      &                         + zkappa_i(1)*tbo)               &
      &                         + tsu*zkappa_i(0)*2.d0
