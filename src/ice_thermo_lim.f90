@@ -96,7 +96,8 @@ contains
       zg1s      =  2.d0
       zg1       =  2.d0
       zbeta     =  0.117d0   ! factor for thermal conductivity
-      zerrmax   =  1.0d-11   ! max error at the surface
+! FD for consistency wih FV/FE      zerrmax   =  1.0d-11   ! max error at the surface
+      zerrmax   =  1.0d-12   ! max error at the surface
 hslim=0.0005d0
 
       IF ( ln_write ) THEN
@@ -527,10 +528,14 @@ hslim=0.0005d0
       ! we verify that nothing has started to melt
       tsu          =  min(tsu,tmelt)
       DO layer  =  1, nlsno
+! FD debug
+if (ts(layer) > tmelt) write(*,*) 'internal melt in snow!',layer,nconv
          ts(layer)  =  min(ts(layer),tmelt)
       END DO
       DO layer  =  1, nlice
          ztmelt_i         =  min(-fracsal*si(layer) + tp0, 273.149999999d0) 
+! FD debug
+if (ti(layer) > ztmelt_i) write(*,*) 'internal melt in ice!',layer,nconv
          ti(layer)  =  min(ti(layer),ztmelt_i)
       END DO
 ! FD debug
@@ -564,7 +569,7 @@ hslim=0.0005d0
 zf=zf+dzf*(tsu-ztsutemp)
 if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
 ! FD debug
-!write(*,*) 'diff fcsu',fcsu,zf,zf-fcsu
+!write(*,*) 'diff fcsu',fcsu,zf,zf-fcsu,nconv
 
       END DO ! FD end of nonlinear convergence
 
@@ -609,29 +614,17 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
          sume3 = sume3 + rhosno * func_El(tmelts,ts(layer) - tp0) * dzs(layer) * ipsnow
       END DO
 ! FD debug energy
-      dsume = fcsu-fcbo
+      dsume = 0.d0 ! FD fcsu-fcbo
       do layer=1,nlice
         dsume = dsume + swradab_i(layer)
       enddo
       do layer=1,nlsno
         dsume = dsume + swradab_s(layer) * ipsnow ! FD
       enddo
-! FD debug write(*,*) 'debug energy after diff',sume3,sume3-sume1,dtice*dsume
-
-      do layer=1,nlice
-        dsume = dsume + swradab_i(layer)
-      enddo
-      do layer=1,nlsno
-        dsume = dsume + swradab_s(layer) * ipsnow ! FD
-      enddo
+! FD debug
+write(*,*) 'debug energy after diff',sume3,sume3-sume1,dtice*(dsume+fcsu-fcbo),dsume+fcsu-fcbo,dsume+zf + oceflx
 ! FD debug energy
-      dsume = zf + oceflx
-      do layer=1,nlice
-        dsume = dsume + swradab_i(layer)
-      enddo
-      do layer=1,nlsno
-        dsume = dsume + swradab_s(layer) * ipsnow ! FD
-      enddo
+      dsume = dsume + zf + oceflx
       fnet = zf
 
       ! ice energy of melting
@@ -772,7 +765,7 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
 !------------------------------------------------------------------------------|
 !
       z_f_surf  = fnet - fcsu
-      z_f_surf  = MAX(0.d0, z_f_surf)
+! FD debug      z_f_surf  = MAX(0.d0, z_f_surf)
 ! FD      z_f_surf  = z_f_surf * MAX(0.d0, SIGN(1.d0,tsu-tmelt))
       if (tsu < tmelt ) z_f_surf  = 0.d0
 
@@ -836,7 +829,8 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
          WRITE(numout,*) ' snow falls! '
          WRITE(numout,*) ' dh_s_prec : ', dh_s_prec
          WRITE(numout,*) ' flux of h : ', -fprecip
-! FD         WRITE(numout,*) ' zqt_s_ini : ', zqt_s_ini / dtice
+! FD debug
+         WRITE(numout,*) ' zqt_s_ini : ', zqt_s_ini / dtice
          WRITE(numout,*)
       ENDIF
 
@@ -847,6 +841,8 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
       zqfont_su        =  z_f_surf * dtice 
       IF ( ln_write ) WRITE(numout,*) ' snow melts! '
       IF ( ln_write ) WRITE(numout,*) ' zqfont_su : ', zqfont_su / dtice 
+! FD debug
+IF ( ln_write ) write(numout,*) 'final snow energy',zqt_s_ini - zqfont_su
 
 ! FD not sure that you can treat snow this way
 ! FD      zdeltah(1)       =  MIN( 0.d0 , - zqfont_su / MAX( zqprec , zeps ) )
@@ -1274,7 +1270,9 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
 
       ! snswi : switch which value equals 1 if snow melts
       !                                 0 if not
-      snswi    =  MAX(0,INT(-dhs/MAX(zeps,ABS(dhs)))) * ipsnow ! FD
+! FD debug      snswi    =  MAX(0,INT(-dhs/MAX(zeps,ABS(dhs)))) * ipsnow ! FD
+      snswi = 0
+      if (dhs < 0.d0 ) snswi =1
 
       ! ice surface behaviour : computation of icsuind-icsuswi
       ! icsuind : index which values equals 0 if there is nothing
@@ -1292,7 +1290,9 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
 
       ! icsuswi : switch which value equals 1 if ice melts at the surface
       !                                   0 if not
-      icsuswi    =  max(0,int(-dhi_surf/max(zeps,abs(dhi_surf))))
+! FD debug      icsuswi    =  max(0,int(-dhi_surf/max(zeps,abs(dhi_surf))))
+      icsuswi = 0
+      if ( dhi_surf < 0 ) icsuswi = 1
 
       ! ice bottom behaviour : computation of icboind-icboswi
       ! icboind : index which values equals 0 if accretion is on the way
@@ -1391,8 +1391,10 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
 !------------------------------------------------------------------------------|
 !
       ! enthalpies
+      layer=1
+      limsum = (1-snswi)*(layer-1) + snswi*(layer+snind-1)
       zqh_s0(1) =  rhosno * ( cp_ice * ( tp0 - (1 - snswi) * tair - & ! fallen snow
-     &             snswi * ts(1) ) + mlfus )* zthick0(1)
+     &             snswi * ts(limsum) ) + mlfus )* zthick0(1)
       zqt_s_ini = zqt_s_ini + zqh_s0(1)
 
       DO layer = 2, nbot0 ! remaining snow
@@ -1400,7 +1402,7 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
          limsum = MIN( limsum, nlsno )
          zqh_s0(layer) = rhosno*( cp_ice*(tp0 - ts(limsum)) + mlfus) * zthick0(layer)
          zswitch   = 1.d0 - MAX (0.d0, SIGN ( 1.d0, zeps - hs ) )
-         zqt_s_ini = zqt_s_ini + ( 1 - snswi ) * zqh_s0(layer) * zswitch
+         zqt_s_ini = zqt_s_ini + ( 1 - snswi ) * zqh_s0(layer) ! FD debug ???? what the hell with that switch ???? * zswitch
       END DO
       zqt_ini = zqt_s_ini
 
@@ -1773,7 +1775,7 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
       END DO
 ! FD debug energy
       write(*,*) 'debug energy',dsume * dtice, sume2 - sume1, sume2
-      if ( abs(dsume*dtice-sume2+sume1) .gt. 1d4 .or. ts(1) .gt. tp0 ) then
+      if ( abs(dsume*dtice-sume2+sume1) .gt. 1d-3 .or. ts(1) .gt. tp0 ) then
           call flush(numout)
           call flush(6)
        OPEN(1,file='restart.dat')
