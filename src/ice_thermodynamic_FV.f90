@@ -278,11 +278,8 @@ subroutine ice_thermo(dtice)
       tiny	=   1.000d-9	! very small number			[-]
 
       hicut	=   0.010d+0	! minimum ice  thickness		[m]
-      hscut	=   0.050d+0	! threshold snow thickness		[m]
       hslim	=   0.005d+0	! minimum snow thickness		[m]
 ! FD debug
-hscut=0.01d0
-hscut=0.001d0
 hslim=0.0005d0
 Tdiff=1d-12
 
@@ -306,10 +303,6 @@ Tdiff=1d-12
       enddo
       Tsurf = tsu - temp0
       tiold(ns) = Tsurf
-      tocn  = tiold(0)
-
-      temp(:,0)=tiold
-      temp(:,1)=tiold
 
 !------------------------------------------------------------------------
 !     Euler method initialization
@@ -326,7 +319,9 @@ Tdiff=1d-12
       do j=1,nlice
         sali(j,0)=si(nlice-j+1)
       enddo
-      sali(ni,0)= salinis
+! FD debug
+!      sali(ni,0)= salinis
+      sali(ni,0)= sali(ni-1,0)
          DO j=ni+1,ns
             sali(j,0) = 0d0
          ENDDO
@@ -349,6 +344,11 @@ Tdiff=1d-12
       heold(ni+1:ns-1)=hs*dzi(ni+1:ns-1)
       he=heold
       henew=he
+
+
+      tocn  = tiold(0)
+      temp(:,0)=tiold
+      temp(:,1)=tiold
 
 !------------------------------------------------------------------------
 !     Vertical (grid) velocities
@@ -438,20 +438,6 @@ Tdiff=1d-12
       Fnet0 =  fac_transmi * swrad + netlw + fsens + flat
       Fnet  = Fnet0
 
-!-----------------------------------------------------------------------
-!     ICE/SNOW case
-!-----------------------------------------------------------------------
-
-
-      Tsbc = .FALSE.
-      counter = 0
-
-!-----------------------------------------------------------------------
-!     Euler loop
-!-----------------------------------------------------------------------
-
-4000  CONTINUE
-
 !------------------------------------------------------------------------
 !     Update conductive heat fluxes
 !------------------------------------------------------------------------
@@ -466,6 +452,20 @@ Tdiff=1d-12
       
       Fcis = -kki(ni) * ( temp(ni,1) - temp(ni-1,1))
       Fcib = -kki(1 ) * ( temp( 1,1) - temp(   0,0))
+
+!-----------------------------------------------------------------------
+!     ICE/SNOW case
+!-----------------------------------------------------------------------
+
+
+      Tsbc = .FALSE.
+      counter = 0
+
+!-----------------------------------------------------------------------
+!     Euler loop
+!-----------------------------------------------------------------------
+
+4000  CONTINUE
 
       Fmlt = Fnet-Fcis
 
@@ -485,6 +485,10 @@ Tdiff=1d-12
      else ! FD no snow
             Fnet = Fnet0 - dzf * (temp(ni,1)-tiold(ni))
      endif
+! FD debug
+if (extra_debug) then
+write(*,*) 'Fnet',Fnet, Fnet0, - dzf * (temp(ni,1)-tiold(ni))
+endif
 
       IF (hs_b(0) > hslim) THEN
         tsu = min(tsu,tf(ns)+temp0)
@@ -515,6 +519,10 @@ Tdiff=1d-12
             dssdt = MIN((-Fnet-Fcss)/rhosno/qm(ns-1),0d0)
             snowfall =0.d0
          ENDIF
+! FD debug
+if (extra_debug) then
+write(*,*) 'snow surfacae melt if <0',dssdt,temp(ns,1)+tiny .GE. Tf(ns),Fnet,Fcss
+endif
       else
 
       ! update ice surface
@@ -522,6 +530,13 @@ Tdiff=1d-12
          IF (temp(ni,1)+tiny .GE. Tf(ni) .AND. -Fnet-Fcis .LT. 0d0) THEN
            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ni-1),0d0)
          ENDIF
+         IF (counter>10.and.w(ni)>1e-7) THEN ! case of a severe limit cycle reached
+           disdt = 0.5d0 * ( disdt - w(ni) ) ! apply a relaxation scheme
+         ENDIF
+! FD debug
+if (extra_debug) then
+write(*,*) 'ice surfacae melt if <0',disdt,temp(ni,1)+tiny .GE. Tf(ni),Fnet,Fcis
+endif
       endif
 
       IF (oceflx-Fcib .LT. 0d0) THEN		! for ice growth: new-ice salin.
@@ -739,6 +754,33 @@ Tdiff=1d-12
       ENDDO
      endif
 
+         DO j=0,ns
+            IF (temp(j,1) .GT. Tf(j)) THEN
+               temp(j,1) = Tf(j)
+            ENDIF
+         ENDDO
+
+!------------------------------------------------------------------------
+!     Update conductive heat fluxes
+!------------------------------------------------------------------------
+
+     IF (hs_b(0) .GT. hslim) THEN
+         Fcss = -kks(ns-1) * ( temp(ns  ,1) - temp(ns-1,1) )
+         Fcsb = -kks(ni  ) * ( temp(ni+1,1) - temp(ni  ,1) )
+      ELSE
+         Fcss = 0d0
+         Fcsb = 0d0
+      ENDIF
+      
+      Fcis = -kki(ni) * ( temp(ni,1) - temp(ni-1,1))
+      Fcib = -kki(1 ) * ( temp( 1,1) - temp(   0,1))
+
+     if ( hs_b(0) > hslim ) then
+            Fnet = Fnet0 - dzf * (temp(ns,1)-tiold(ns))
+     else ! FD no snow
+            Fnet = Fnet0 - dzf * (temp(ni,1)-tiold(ni))
+     endif
+
 ! FD debug
 if (extra_debug) then
  write(*,'(I6,300(1x,e9.3))') counter, w(1:ns-1)
@@ -746,28 +788,45 @@ if (extra_debug) then
 endif
 
      if (hs_b(0)>hslim) then
-      IF ((temp(ns,1) .GT. Tf(ns)) .AND. (Tsbc .EQV. .FALSE.)) THEN
+! FD debug
+if (extra_debug) then
+write(*,*) 'condition on snow melt', temp(ns,1)+tiny .GE. Tf(ns), Tsbc,-Fnet-Fcss.gt.0.d0
+endif
+      IF (( temp(ns,1)+tiny .GE. Tf(ns)) .AND. (Tsbc .EQV. .FALSE.)) THEN
          Tsbc = .TRUE. 
       ENDIF
       IF ( temp(ns,1)+tiny .GE. Tf(ns) .AND. -Fnet-Fcss .GT. 0d0 ) THEN
          Tsbc = .FALSE.
          temp(ns,1)=Tf(ns)-1d-2
-      ENDIF
+     ENDIF
      else if ( hs_b(0) <= hslim ) then ! FD no snow
-      IF ((temp(ni,1) .GT. Tf(ni)) .AND. (Tsbc .EQV. .FALSE.)) THEN
+! FD debug
+if (extra_debug) then
+write(*,*) 'condition on ice melt', (temp(ni,1)+tiny .GE. Tf(ni)), (Tsbc .EQV. .FALSE.), &
+ ((temp(ni,1)+tiny .GE. Tf(ni)) .AND. (Tsbc .EQV. .FALSE.))
+endif
+      IF ((temp(ni,1)+tiny .GE. Tf(ni)) .AND. (Tsbc .EQV. .FALSE.)) THEN
          Tsbc = .TRUE. 
       ENDIF
-      IF ( temp(ni,1)+tiny .GE. Tf(ni) .AND. -Fnet-Fcss .GT. 0d0 ) THEN
+! FD debug
+if (extra_debug) then
+write(*,*) 'condition on ice refreeze',temp(ni,1)+tiny .GE. Tf(ni) , -Fnet-Fcis .GT. 0d0, &
+( temp(ni,1)+tiny .GE. Tf(ni) .AND. -Fnet-Fcis .GT. 0d0 .and. w(ni)==0.d0 )
+endif
+      IF ( temp(ni,1)+tiny .GE. Tf(ni) .AND. -Fnet-Fcis .GT. 0d0 .and. w(ni)==0.d0) THEN
          Tsbc = .FALSE.
          temp(ni,1)=Tf(ni)-1d-2
       ENDIF
      endif
 
-         DO j=0,ns
-            IF (temp(j,1) .GT. Tf(j)) THEN
-               temp(j,1) = Tf(j)
-            ENDIF
-         ENDDO
+! FD debug
+if (extra_debug) then
+ if (hs_b(0)>hslim) then
+  write(*,*) 'SBCond snow',Tsbc,Fnet,Fcss
+ else
+  write(*,*) 'SBCond ice',Tsbc,Fnet,Fcis
+endif
+endif
 
 !-----------------------------------------------------------------------
 !     Update T-S dependent ice parameters
@@ -791,7 +850,7 @@ endif
          dTlay = ABS(temp(j,1)-temp(j,0))	! T diff in a layer
          dTmax = MAX(dTmax,dTlay)		! max diff in s/ice slab
       ENDDO
-      IF (dTmax .GT. Tdiff .and. counter < 50 ) THEN
+      IF (dTmax .GT. Tdiff .and. counter < 100 ) THEN
          counter=counter+1
          DO j=0,ns
             temp(j,0) = temp(j,1)		! update temperature
@@ -867,7 +926,7 @@ if (debug) then
  write(*,'(I6,300(f8.3,1x))') counter, temp(0:ns,1)
 endif
 ! FD debug if energy not conserved
-      IF ( abs(Einp-dEin) > 1e7 ) THEN
+      IF ( abs(Einp-dEin) > 1e-3 ) THEN
        OPEN(1,file='restart.dat')
        WRITE(1,*) nlice,nlsno,ith_cond
        WRITE(1,*) ti(1:nlice),ts(1:nlsno+1),tsuold,tbo
