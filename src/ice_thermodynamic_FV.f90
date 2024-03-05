@@ -4,12 +4,6 @@ module ice_thermodynamic_FV
 
 implicit none
 
-  logical :: very_first=.true.
-
-      double precision &
-                temp	(0:maxlay,0:1),&! internal sea ice temperature		[C]
-     		theta	(0:maxlay,0:1)  ! internal sea ice heat content		[C*m]
-
 contains
 
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -167,6 +161,10 @@ subroutine ice_thermo(dtice)
      		esat,&
      		sal
 
+      double precision &
+                temp	(0:maxlay,0:1),&! internal sea ice temperature		[C]
+     		theta	(0:maxlay,0:1)  ! internal sea ice heat content		[C*m]
+
       DOUBLE PRECISION	AT1(0:maxlay), BT1(0:maxlay), CT1(0:maxlay), DT0(0:maxlay), &
       			C1i, C2i, C3i, C4i,    C1s, C2s, C3s, C4s, &
       			OT1, PT1, QT1,&
@@ -318,7 +316,6 @@ Tdiff=1d-12
       hi_b(0:1)=hi
 
 ! conversion from LIM3
-    if (very_first) then
       temp(0,:)=tbo - temp0
       do j=1,nlice
         temp(j,:)=ti(nlice-j+1)  - temp0
@@ -327,10 +324,8 @@ Tdiff=1d-12
       do j=1,nlsno
         temp(j+ni,:)=ts(nlsno-j+1)  - temp0
       enddo
-      temp(ns,:) = tsu - temp0
-      very_first=.false.
-    endif
-      Tsurf = temp(ns,0)
+      Tsurf = tsu - temp0
+      temp(ns,:) = Tsurf
       tocn  = temp(0,0)
 
 !------------------------------------------------------------------------
@@ -490,7 +485,6 @@ Tdiff=1d-12
          IF (j .LT. ni) THEN
             ks(j) = 0d0
          ELSEIF (j .GE. ni) THEN
-! FD original value too different from LIM           ks(j) = ks0
             ks(j) = cond_sno
          ENDIF
       ENDDO
