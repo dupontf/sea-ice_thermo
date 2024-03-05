@@ -5,7 +5,7 @@ module ice_thermo_lim
 implicit none
 
 ! FD debug
-double precision sume1, sume2, dsume, sume3, sume4
+double precision sume1, sume2, dsume, sume3, sume4, fnet
 
       integer ipsnow, ipmelt
 
@@ -82,7 +82,7 @@ contains
       double precision &
                  zrchu1, zrchu2, zqsat, zssdqw, ztmelt_i, zkimin, &
                  zg1s, ztsuold, ztsutemp, zg1, zeps, zerrit, &
-                 zerrmax, zf, zbeta, zdifcase, zref
+                 zerrmax, zf, zbeta, zdifcase, zref, zf0
       double precision dzf
       double precision es
       integer layer
@@ -214,6 +214,37 @@ hslim=0.0005d0
            ztiold(layer)    = ti(layer)
         END DO
 
+!
+!------------------------------------------------------------------------------|
+!  7) surface flux computation                                                 |
+!------------------------------------------------------------------------------|
+!
+      tsu = min(tsu,tmelt)
+      ipmelt   = int(max(0.d0,sign(1.d0,tsu-tp0)))
+      ! pressure of water vapor saturation (Pa)
+      es         =  611.d0*10.d0**(9.5d0*(tsu-273.16d0)/(tsu-7.66d0))
+      ! net longwave radiative flux
+      netlw = emi*(dwnlw - stefa*tsu*tsu*tsu*tsu)
+      ! sensible and latent heat flux
+      CALL flx(hi,tsu,tair,qair,fsens, &
+     &         flat,q0,zrchu1,zrchu2,uair,zref)
+      fsens   =  -fsens
+      flat   =  MIN( -flat , 0.d0 ) ! always negative, as precip 
+                                           ! energy already added
+
+      ! intermediate variable
+      zssdqw     =  q0*q0*pres/ &
+     &              (0.622d0*es)*log(10.d0)*9.5d0* &
+     &              ((273.16d0-7.66d0)/(tsu-7.66d0)**2.d0)
+      ! derivative of the surface atmospheric net flux
+          dzf    =  -4.d0*emi*stefa*tsu*tsu*tsu &
+     &              -(zrchu1+zrchu2*zssdqw)
+      ! surface atmospheric net flux
+          zf0     =  fac_transmi * swrad + netlw + fsens + flat
+! FD debug
+!write(*,*) 'atmo flux during nonlinear conv',zf
+
+
       nconv     =  0
 
         !------------------------------
@@ -259,33 +290,7 @@ hslim=0.0005d0
      &                  ,zeps)
       END DO
 
-!
-!------------------------------------------------------------------------------|
-!  7) surface flux computation                                                 |
-!------------------------------------------------------------------------------|
-!
-      tsu = min(tsu,tmelt)
-      ipmelt   = int(max(0.d0,sign(1.d0,tsu-tp0)))
-      ! pressure of water vapor saturation (Pa)
-      es         =  611.d0*10.d0**(9.5d0*(tsu-273.16d0)/(tsu-7.66d0))
-      ! net longwave radiative flux
-      netlw = emi*(dwnlw - stefa*tsu*tsu*tsu*tsu)
-      ! sensible and latent heat flux
-      CALL flx(hi,tsu,tair,qair,fsens, &
-     &         flat,q0,zrchu1,zrchu2,uair,zref)
-      fsens   =  -fsens
-      flat   =  MIN( -flat , 0.d0 ) ! always negative, as precip 
-                                           ! energy already added
-
-      ! intermediate variable
-      zssdqw     =  q0*q0*pres/ &
-     &              (0.622d0*es)*log(10.d0)*9.5d0* &
-     &              ((273.16d0-7.66d0)/(tsu-7.66d0)**2.d0)
-      ! derivative of the surface atmospheric net flux
-          dzf    =  -4.d0*emi*stefa*tsu*tsu*tsu &
-     &              -(zrchu1+zrchu2*zssdqw)
-      ! surface atmospheric net flux
-          zf     =  fac_transmi * swrad + netlw + fsens + flat
+      zf=zf0+dzf*(tsu-tsu0)
 ! FD debug
 !write(*,*) 'atmo flux during nonlinear conv',zf
 
@@ -592,22 +597,7 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
      &           -(1.d0-dble(ipsnow))*zkappa_i(0)*zg1  *(ti(1) - tsu)
          fcbo = -zkappa_i(nlice)*zg1* (tbo-ti(nlice))
       ENDIF
-!
-!--------------------------------------------------------------------------
-!   12) Update atmospheric heat fluxes and energy of melting              |
-!--------------------------------------------------------------------------
-!
-      ! pressure of water vapor saturation (Pa)
-      es         =  611.d0*10.d0**(9.5d0*(tsu-273.16d0)/(tsu-7.66d0))
-      ! net longwave radiative flux
-      netlw = emi*(dwnlw-stefa*tsu*tsu*tsu*tsu)
-      ! sensible and latent heat flux
-      CALL flx(hi,tsu,tair,qair,fsens, &
-     &         flat,q0,zrchu1,zrchu2,uair,zref)
 
-      fsens   =  -fsens
-      flat   =  MIN( -flat , 0.d0 ) ! always negative, as precip 
-                                           ! energy already added
 ! FD debug compute energy
       sume3 = 0.d0
       DO layer = 1, nlice
@@ -635,13 +625,14 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
         dsume = dsume + swradab_s(layer) * ipsnow ! FD
       enddo
 ! FD debug energy
-      dsume = netlw + flat + fsens + fac_transmi * swrad + oceflx
+      dsume = zf + oceflx
       do layer=1,nlice
         dsume = dsume + swradab_i(layer)
       enddo
       do layer=1,nlsno
         dsume = dsume + swradab_s(layer) * ipsnow ! FD
       enddo
+      fnet = zf
 
       ! ice energy of melting
       CALL ice_energy
@@ -780,7 +771,7 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
 !  1) Calculate available heat for surface ablation         
 !------------------------------------------------------------------------------|
 !
-      z_f_surf  = netlw + flat + fsens - fcsu + fac_transmi * swrad
+      z_f_surf  = fnet - fcsu
       z_f_surf  = MAX(0.d0, z_f_surf)
 ! FD      z_f_surf  = z_f_surf * MAX(0.d0, SIGN(1.d0,tsu-tmelt))
       if (tsu < tmelt ) z_f_surf  = 0.d0
