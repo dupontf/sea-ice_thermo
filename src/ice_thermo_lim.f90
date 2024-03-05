@@ -11,7 +11,7 @@ double precision sume1, sume2, dsume, sume3, sume4
 
 ! restart
 double precision, dimension(maxlay) :: ti0, ts0, dzi0, dzs0, si0
-double precision hi0, hs0, tsu0
+double precision hi0, hs0, tsu0, snowfall0
 
 contains
 
@@ -164,6 +164,7 @@ hslim=0.0005d0
       si0(1:nlice)=si(1:nlice)
       dzi0(1:nlice) = dzi(1:nlice)
       dzs0(1:nlsno) = dzs(1:nlsno)
+      snowfall0 = snowfall
 
 !
 !------------------------------------------------------------------------------
@@ -625,7 +626,7 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
       do layer=1,nlsno
         dsume = dsume + swradab_s(layer) * ipsnow ! FD
       enddo
-!write(*,*) 'debug energy after diff',sume3,sume3-sume1,dtice*dsume
+! FD debug write(*,*) 'debug energy after diff',sume3,sume3-sume1,dtice*dsume
 
       do layer=1,nlice
         dsume = dsume + swradab_i(layer)
@@ -1790,7 +1791,7 @@ if (zf-fcsu.lt.0.d0.and.tsu==tmelt) tsu=tsu-1d-3
        WRITE(1,*) si0(1:nlice),seasal
        WRITE(1,*) hi0,hs0
        WRITE(1,*) dzi0(1:nlice),dzs0(1:nlsno)
-       WRITE(1,*) snowfall,dwnlw,tsu0,tair,qair,uair,swrad,oceflx,pres
+       WRITE(1,*) snowfall0,dwnlw,tsu0,tair,qair,uair,swrad,oceflx,pres
        WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
        CLOSE(1)
           stop 'energy cons pb'
