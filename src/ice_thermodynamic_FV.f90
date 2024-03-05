@@ -227,6 +227,7 @@ subroutine ice_thermo(dtice)
   double precision elays0
   logical :: debug=.false.
   logical :: extra_debug=.false.
+  double precision :: hsold, tsuold, sfallold
 ! FD debug
  debug=.true.
 ! extra_debug=.true.
@@ -332,11 +333,9 @@ Tdiff=1d-12
 
       sali(:,1)=sali(:,0) ! FD not sure what is really done in this code, just for debug
 
-!---------------------------------------------------------------------
-! do computation if only enough ice
-!---------------------------------------------------------------------
-
- if (hi.gt.hminice) then
+      hsold = hs
+      tsuold = tsu
+      sfallold = snowfall
 
 1000 continue
 !------------------------------------------------------------------------
@@ -546,12 +545,6 @@ Tdiff=1d-12
       endif
 
       hi_b(1)	= hi_b(0) + dhidt*dtice
-! FD debug
-      if ( hi_b(1) < hminice ) then
-         hi_b(1) = 0.d0
-         hi = 0.d0
-         goto 5000
-      endif
 
       henew(1:ni-1)=dzi(1:ni-1)*hi_b(1)
       henew(ni+1:ns-1)=dzi(ni+1:ns-1)*hs_b(1)
@@ -874,17 +867,17 @@ if (debug) then
  write(*,'(I6,300(f8.3,1x))') counter, temp(0:ns,1)
 endif
 ! FD debug if energy not conserved
-!      IF ( abs(Einp-dEin) > 1e-3 ) THEN
-!       OPEN(1,file='restart.dat')
-!       WRITE(1,*) nlice,nlsno,ith_cond
-!       WRITE(1,*) ti(1:nlice),ts(1:nlsno+1),tsu,tbo
-!       WRITE(1,*) si(1:nlice)
-!       WRITE(1,*) hi,hs
-!       WRITE(1,*) snowfall,dwnlw,tsu,tair,qair,uair,swrad,oceflx
-!       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
-!       CLOSE(1)
-!       STOP 'energy not conserved'
-!      ENDIF
+      IF ( abs(Einp-dEin) > 1e7 ) THEN
+       OPEN(1,file='restart.dat')
+       WRITE(1,*) nlice,nlsno,ith_cond
+       WRITE(1,*) ti(1:nlice),ts(1:nlsno+1),tsuold,tbo
+       WRITE(1,*) si(1:nlice)
+       WRITE(1,*) hi,hsold
+       WRITE(1,*) sfallold,dwnlw,tsuold,tair,qair,uair,swrad,oceflx,pres
+       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
+       CLOSE(1)
+       STOP 'energy not conserved'
+      ENDIF
 
 ! FD debug
 !stop
@@ -904,7 +897,6 @@ endif
       ENDIF
       
 
-5000 continue
 ! FD prepare for callback
 
 !    write(*,'(5(f10.3,1x),I6)') tocn,temp(0,1),temp(ns,1),tair,hice,counter
@@ -931,8 +923,6 @@ endif
        WRITE(*,*) ' ht_s_b : ', hs
        WRITE(*,*) ' ht_i_b : ', hi
       endif
-
- endif ! end of condition for hi > hslim
 
 ! conversion from LIM3
       tbo=temp(0,1) + temp0
