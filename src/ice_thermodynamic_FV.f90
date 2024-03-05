@@ -59,22 +59,12 @@ subroutine ice_thermo(dtice)
      			    salinity, bbc, sbc
 
       double precision :: uiofix, & ! constant relative ice-ocean velocity		[m/s]
-     		himax,	&! maximum ice thickness				[m]
-     		himin,	&! minimum ice thickness				[m]
      		sigma,	&! Stefan Bolzmann constant			[W/m/K4]
      		temp0,	&! melt temperature of snow and ice		[K]
      		tiny,	&! very small number (1d-9)			[-]
      		Tdiff    ! temperature difference in Euler step		[C]
 
       DOUBLE PRECISION :: &
-     		beta,	&! empirical constant			       [W/m/psu]
-     		Clh,	&! latent   heat transfer coefficient		[-]
-     		Csh,	&! sensible heat transfer coefficient		[-]
-     		Coi,	&! ocean-ice sens heat transfer coeff		[-]
-     		cp0,	&! specific heat capacity of ice/snow		[J/kg/C]
-     		cpa,	&! specific heat capacity of air			[J/kg/C]
-     		cpo,	&! specific heat capacity of ocn water		[J/kg/C]
-     		cpw,	&! specific heat capacity of water		[J/kg/C]
      		dzi,	&! delta z for ice				[-]
      		dzs,	&! delta z for snow				[-]
      		epsilon,&! coefficient of emissivity			[-]
@@ -96,11 +86,6 @@ subroutine ice_thermo(dtice)
      		phi,	&! weight of Tnew to update T in Euler loop	[-]
      		phi0,	&! weight of Tnew to update T in Euler loop	[-]
      		phi2,	&! weight of Tnew to update T in Euler loop	[-]
-     		rhoa,	&! density of air				[kg/m3]
-     		rhoi,	&! density of ice				[kg/m3]
-     		rhos,	&! density of snow				[kg/m3]
-     		rhoo,	&! density of ocean water			[kg/m3]
-     		rhow,	&! density of fresh water			[kg/m3]
      		salinis,&! salinity of surf. sea ice			[psu]
      		salinib,&! salinity of basal sea ice			[psu]
      		salnice,&! salinity of new basal ice			[psu]
@@ -147,6 +132,7 @@ subroutine ice_thermo(dtice)
      		ks	(0:maxlay)    ,&! snow thermal conductivity			[W/m/C]
      		lh	(0:maxlay,0:1),&! bulk latent heat				[J*m/kg]
       		qm	(0:maxlay)    ,&! volumetric energy of melt (rho*Lf(S,T))	[W/m3]
+      		cp	(0:maxlay)    ,&! heat capacity for ice	[W/kg/K^-1]
      		R	(0:maxlay)    ,&! penetrating shortwave radiation		[W/m3]
      		sh	(0:maxlay,0:1),&! bulk specific heat			[J/kg/C]
      		sali	(0:maxlay,0:1),&! internal sea ice salinity			[psu]
@@ -180,7 +166,7 @@ subroutine ice_thermo(dtice)
   character (len=20) :: Sprofile
   integer i,j,counter
   double precision dzf, es, zssdqw, zrchu1, zrchu2, q0, zref
-  double precision tiold(0:maxlay)
+  double precision, dimension(0:maxlay) :: tiold, tinew
   double precision elays0
   logical :: debug=.false.
   logical :: extra_debug=.false.
@@ -214,14 +200,6 @@ subroutine ice_thermo(dtice)
 !     Some physical constants
 !------------------------------------------------------------------------
 
-      beta	=   1.172d-1	! empirical constant in ki(S,T)	       [W/m/psu]
-      mu	=   0.054d+0	! empirical constant relating S and Tf	[C/psu]
-
-      cp0	=   2.062d+3	! specific heat capacity of ice/snow	[J/kg/C]
-      cpa	=   1.005d+3	! specific heat capacity of air		[J/kg/C]
-      cpo	=   3.990d+3	! specific heat capacity of ocn water	[J/kg/C]
-      cpw	=   4.170d+3	! specific heat capacity of water	[J/kg/C]
-
       Lf0	=   3.335d+5	! spec. latent heat of fusion, ice/snow [J/kg]
       Lsub	=   2.834d+6	! spec. latent heat of sublim, ice/snow [J/kg]
       Lvap	=   2.501d+6	! spec. latent heat of vapori, ice/snow [J/kg]
@@ -230,15 +208,6 @@ subroutine ice_thermo(dtice)
 
       ki0	=   2.034d+0	! thermal conductivity of fresh ice	[W/m/C]
       ks0	=   0.500d+0	! thermal conductivity of snow		[W/m/C]
-
-      kappai	=   1.500d+0	! extinction coefficient of ice		[1/m]
-      kappas	=  10.000d+0	! extinction coefficient of snow	[1/m]
-
-      rhoa	=   1.275d+0	! density of air (dry)			[kg/m3]
-      rhoi	= 917.000d+0	! density of ice			[kg/m3]
-      rhos	= 330.000d+0	! density of snow			[kg/m3]
-      rhoo	=   1.025d+3	! density of ocean water		[kg/m3]
-      rhow	=   1.000d+3	! density of fresh water		[kg/m3]
 
       sigma	=   5.670d-8	! Stefan-Boltzmann constant	       [W/m2/K4]
       temp0	= 273.160d+0	! freezing point temp of fresh water	[K]
@@ -254,16 +223,6 @@ subroutine ice_thermo(dtice)
       salinib	=   4.000d+0    ! salinity at ice base			[psu]
 ! FD test      salnice	=  10.000d+0    ! salinity of newly formed ice		[psu]
       salnice	=  4.000d+0    ! salinity of newly formed ice		[psu]
-
-      ! force salinity = 0 for conistency
-      ! the E definition is not valid for brine='n' and S~=0
-
-      i0snow    =   0.080d+0 	! SW fraction penetrating snow surface
-      i0ice     =   0.170d+0	! SW fraction penetrating ice  surface
-
-      Clh	=   1.000d-3	! latent heat transfer coefficient	[-]
-      Csh	=   1.000d-3	! sensible heat transfer coefficient	[-]
-      Coi	=   1.000d-3	! ocean-ice sens heat transfer coeff	[-]
 
       Fbase	=   oceflx	! conductive heat flux at ice base 	[W/m2]
 
@@ -293,7 +252,6 @@ subroutine ice_thermo(dtice)
 
       phi       =   0.150d0 	! relaxation parameter in Euler step	[-]
 
-      himin	=   1.000d+9	! initial value of himin (dummy: 1d9)	[m]
       hicut	=   0.010d+0	! minimum ice  thickness		[m]
       hscut	=   0.050d+0	! threshold snow thickness		[m]
       hslim	=   0.005d+0	! minimum snow thickness		[m]
@@ -301,10 +259,6 @@ subroutine ice_thermo(dtice)
 hscut=0.01d0
 hscut=0.001d0
 hslim=0.0005d0
-!hs=0.d0
-!snowfall=0.d0
-!swradab_s=0.d0
-!swradab_i=0.d0
 Tdiff=1d-12
 
 !------------------------------------------------------------------------
@@ -381,7 +335,6 @@ Tdiff=1d-12
 !     Initial salinity profile
 !-----------------------------------------------------------------------
 
-! FD      sali(0,0)=salinib
       sali(0,0)=salnice
       do j=1,nlice
         sali(j,0)=si(nlice-j+1)
@@ -393,30 +346,6 @@ Tdiff=1d-12
 
       sali(:,1)=sali(:,0) ! FD not sure what is really done in this code, just for debug
 
-! FD      Sprofile = 'linear'				!!! select an option
-! FD
-! FD         DO j=0,ni
-! FD            IF (Sprofile .EQ. 'isohaline') THEN		! constant with depth
-! FD               sali(j,0) = salinib
-! FD            ELSEIF (Sprofile .EQ. 'Cox&Weeks') THEN	! Cox and Weeks (1974)
-! FD               sali(j,0) = sal(hi_b(0))
-! FD            ELSEIF (Sprofile .EQ. 'linear') THEN	! linear with depth
-! FD               sali(j,0) = salinib*(1d0-zic(j)) + salinis*zic(j)
-! FD            ELSEIF (Sprofile .EQ. '1stLay0') THEN	! 1st layer zero, then
-! FD               sali(j,0) = (salinis-salinib)	&	! linear with depth (HH)
-! FD                         / (zic(ni-1)-zic(0))   &
-! FD                         * zic(j) + salinib
-! FD               sali(ni,0)= salinis
-! FD
-! FD            ENDIF
-! FD         ENDDO
-! FD
-! FD         DO j=ni+1,ns
-! FD            sali(j,0) = 0d0
-! FD         ENDDO
-! FD
-! FD      sali(:,1)=sali(:,0) ! FD not sure what is really done in this code, just for debug
-
 1000 continue
 !------------------------------------------------------------------------
 !     Vertical (grid) velocities
@@ -424,38 +353,6 @@ Tdiff=1d-12
 
       DO j=1,ns-1
          w(j) = 0d0		! initial grid advection
-      ENDDO
-
-      hinit = hi_b(0)
-      himin = hi_b(0)
-      himax = hi_b(0)
-
-!------------------------------------------------------------------------
-!     Initialize the theta (hT) values from the T and h profile
-!------------------------------------------------------------------------
-
-      DO j=0,ni
-         theta(j,0) = temp(j,0)*hi_b(0)
-         theta(j,1) = theta(j,0)
-      ENDDO
-
-      DO j=ni+1,ns
-         theta(j,0) = temp(j,0)*hs_b(0)
-         theta(j,1) = theta(j,0)
-      ENDDO
-
-!------------------------------------------------------------------------
-!     Initialize the hsali (hS) values from the S and h profile
-!------------------------------------------------------------------------
-      
-      DO j=0,ni
-         hsali(j,0) = sali(j,0)*hi_b(0)
-         hsali(j,1) = hsali(j,0)
-      ENDDO
-
-      DO j=ni+1,ns
-         hsali(j,0) = sali(j,0)*hs_b(0)
-         hsali(j,1) = hsali(j,0)
       ENDDO
 
 !------------------------------------------------------------------------
@@ -466,11 +363,12 @@ Tdiff=1d-12
             Tf(j)   = Tfreeze1(sali(j,0))
             ki(j)   = func_ki(sali(j,0),temp(j,0))
             qm(j)   = func_qm(Tf(j),temp(j,0))
+            cp(j)   = func_cp(Tf(j),temp(j,0),tiold(j))
             sh(j,0) = func_sh(Tf(j),temp(j,0))
          IF (j .LE. ni) THEN
-            lh(j,0) = func_lh(Tf(j),temp(j,0))*hi
+            lh(j,0) = func_lh(Tf(j),temp(j,0))*hi*dzi
          ELSEIF (j .GT. ni) THEN
-            lh(j,0) = func_lh(Tf(j),temp(j,0))*hs
+            lh(j,0) = func_lh(Tf(j),temp(j,0))*hs*dzs
          ENDIF
       ENDDO
 
@@ -635,14 +533,18 @@ Tdiff=1d-12
       if (hs_b(0) > hslim) then
          ! snow depth evolution due to melt superposed on precip
 
-         IF (temp(ns,1)+tiny .GE. Tf(ns) .AND. -Fnet-Fcss .LT. 0d0) &
-            dssdt = dssdt+MIN((-Fnet-Fcss)/rhos/qm(ns-1),0d0)
+         IF (temp(ns,1)+tiny .GE. Tf(ns) .AND. -Fnet-Fcss .LT. 0d0) THEN
+! FD            dssdt = dssdt+MIN((-Fnet-Fcss)/rhosno/qm(ns-1),0d0)
+! FD the code cannot deal with concomittent snow accumulation and melt
+            dssdt = MIN((-Fnet-Fcss)/rhosno/qm(ns-1),0d0)
+            snowfall =0.d0
+         ENDIF
       else
 
       ! update ice surface
 
          IF (temp(ni,1)+tiny .GE. Tf(ni) .AND. -Fnet-Fcis .LT. 0d0) THEN
-           disdt = MIN((-Fnet-Fcis)/rhoi/qm(ni-1),0d0)
+           disdt = MIN((-Fnet-Fcis)/rhoice/qm(ni-1),0d0)
          ENDIF
       endif
 
@@ -659,8 +561,7 @@ Tdiff=1d-12
       ENDIF
 ! FD generalized bottom
          heatflx_bot = oceflx-Fcib
-         dibdt	= heatflx_bot / rhoi / energy_bot
-
+         dibdt	= heatflx_bot / rhoice / energy_bot
 
       dhsdt	= dssdt - dsbdt
       dhidt	= disdt - dibdt ! original
@@ -683,13 +584,14 @@ Tdiff=1d-12
 
 ! FD      fwf = fwf0 + ( dhsdt*rhos + dhidt*rhoi ) / rhoo
 
+! FD should remove the following lines in future
       DO j=0,ni
          Tf(j)   = Tfreeze1(sali(j,1))
-         lh(j,1) = func_lh(Tf(j),temp(j,1))*hi_b(1)
+         lh(j,1) = func_lh(Tf(j),temp(j,1))*hi_b(1)*dzi
       ENDDO
       DO j=ni+1,ns
          Tf(j)   = Tfreeze1(sali(j,1))
-         lh(j,1) = func_lh(Tf(j),temp(j,1))*hs_b(1)
+         lh(j,1) = func_lh(Tf(j),temp(j,1))*hs_b(1)*dzs
       ENDDO
 
 !-----------------------------------------------------------------------
@@ -710,17 +612,17 @@ Tdiff=1d-12
 !     Define constant coefficients
 !-----------------------------------------------------------------------
 
-      C1i	= dtice/2d0/rhoi/hi_b(1)/hi_b(1)/dzi/dzi
-      C2i	= dtice/dzi
-      C3i	= dtice*hi_b(1)/rhoi
+      C1i	= dtice/2d0/rhoice/hi_b(1)/dzi
+      C2i	= dtice
+      C3i	= dtice*hi_b(1)*dzi/rhoice
       C4i	= 3d0*hi_b(1)*dzi
 
      if (hs_b(0) > hscut ) then
-      C1s	= dtice/2d0/rhos/hs_b(1)/hs_b(1)/dzs/dzs
-      C2s	= dtice/dzs
-      C3s	= dtice*hs_b(1)/rhos
+      C1s	= dtice/2d0/rhosno/hs_b(1)/dzs
+      C2s	= dtice
+      C3s	= dtice*hs_b(1)*dzs/rhosno
       C4s	= 3d0*hs_b(1)*dzs
-      if (nlsno ==1 ) c1s = dtice/rhos/hs_b(1)/hs_b(1)
+      if (nlsno ==1 ) c1s = dtice/rhosno/hs_b(1)
       if (nlsno ==1 ) c4s = hs_b(1)
      else if ( hs_b(0) <= hscut .and. hs_b(0) > hslim ) then
       C4s	= hs_b(1)
@@ -730,29 +632,6 @@ Tdiff=1d-12
 !     Absorbed SW radiation energy per unit volume (R)       
 !     1/dz Int_z^z+dz R dz = Rtrans(z+dz) - Rtrans(z)
 !-----------------------------------------------------------------------
-
-! FD modif: use B grid of (w locations)
-! FD      DO j=ns-1,ni,-1
-! FD         Fr(j)	= 4.d0 * EXP(-kappas*(1d0-zsb(j))*hs_b(1))
-! FD      ENDDO
-! FD      Rtrans = Fr(ni)
-! FD      DO j=ni-1,1,-1
-! FD         Fr(j)	= Rtrans * EXP(-kappai*(1d0-zib(j))*hi_b(1))
-! FD      ENDDO
-! FD      R(0)=0.d0
-! FD      do j=1,ni-1
-! FD         R(j) = (Fr(j+1)-Fr(j))/dzi/hi_b(1)
-! FD      enddo
-! FD      R(ni)=0.d0
-! FD      if (hs_b(1) > hscut ) then
-! FD      do j=ni+1,ns-1
-! FD         R(j) = (Fr(j)-Fr(j-1))/dzs/hs_b(1)
-! FD      enddo
-! FD      else
-! FD         R(ni+1:ns-1)=0.d0
-! FD      endif
-! FD      Frad = Fr(ns)-Fr(1)
-! FDwrite(*,*) Fr(1:ns-1)
 
       if (hs_b(1) > hscut ) then
         DO j=ns-1,ni+1,-1
@@ -773,39 +652,39 @@ Tdiff=1d-12
 
 3000  CONTINUE
 
+         AT1=0.d0; BT1=0.d0; CT1=0.d0; DT0=0.d0;
+
          AT1(1)	= -C1i/3d0*16d0*ki(0)
-         BT1(1)	=  C1i/3d0*(3d0*ki(2)+3d0*ki(1)+18d0*ki(0))+sh(1,1)
+         BT1(1)	=  C1i/3d0*(3d0*ki(2)+3d0*ki(1)+18d0*ki(0)) &
+                  +sh(1,1)*hi_b(1)*dzi
          CT1(1)	= -C1i/3d0*(3d0*ki(2)+3d0*ki(1)+2d0*ki(0))
-         DT0(1)	=  C3i*R(1)+sh(1,0)*theta(1,0) &
+         DT0(1)	=  C3i*R(1)+sh(1,0)*tiold(1)*hi_b(0)*dzi &
                   -lh(1,1)+lh(1,0)
 
       IF (w(1) .GT. 0d0) THEN
-         AT1(1) = AT1(1) - C2i*w(1)*sh(0,1)
-         DT0(1) = DT0(1) + C2i*w(1)*lh(0,1)
-! FD         DT0(1) = DT0(1) + C2i*heatflx_bot/rhoi*(-1.d0)
+         AT1(1) = AT1(1) - C2i*w(1)*sh(0,1) * hi_b(1)
+         DT0(1) = DT0(1) + C2i*w(1)*lh(0,1) / dzi
       ELSE
-         BT1(1) = BT1(1) - C2i*w(1)*sh(1,1)
-         DT0(1) = DT0(1) + C2i*w(1)*lh(1,1)
+         BT1(1) = BT1(1) - C2i*w(1)*sh(1,1) * hi_b(1)
+         DT0(1) = DT0(1) + C2i*w(1)*lh(1,1) / dzi
       ENDIF
       IF ( w(2) .GT. 0d0 ) THEN
-         BT1(1) = BT1(1) + C2i*w(2)*sh(1,1)
-         DT0(1) = DT0(1) - C2i*w(2)*lh(1,1)
+         BT1(1) = BT1(1) + C2i*w(2)*sh(1,1) * hi_b(1)
+         DT0(1) = DT0(1) - C2i*w(2)*lh(1,1) / dzi
       ELSE
-         CT1(1) = CT1(1) + C2i*w(2)*sh(2,1)
-         DT0(1) = DT0(1) - C2i*w(2)*lh(2,1)
+         CT1(1) = CT1(1) + C2i*w(2)*sh(2,1) * hi_b(1)
+         DT0(1) = DT0(1) - C2i*w(2)*lh(2,1) / dzi
       ENDIF
 
       IF (bbc .EQ. 'fixT') THEN
          BT1(0)	= 1d0
          CT1(0)	= 0d0
-         DT0(0)	= tocn*hi_b(1)
+         DT0(0)	= tocn
       ELSE
          BT1(0) = ( 8d0*ki(0))
          CT1(0) = (-9d0*ki(0))
          OT1	= ( 1d0*ki(0))
-         DT0(0) = ( C4i*hi_b(1)*Fbase )
-! FD         DT0(0) = ( C4i*hi_b(1)*(Fbase-heatflx_bot) )
-! FD         DT0(0) = ( C4i*hi_b(1)*Fcib )
+         DT0(0) = ( C4i*Fbase )
          
          BT1(0) = OT1*AT1(1)-CT1(1)*BT1(0)
          CT1(0) = OT1*BT1(1)-CT1(1)*CT1(0)
@@ -814,102 +693,91 @@ Tdiff=1d-12
       
       DO j=2,ni-2
          AT1(j) = -C1i*(ki(j)+ki(j-1))
-         BT1(j) =  C1i*(ki(j+1)+2d0*ki(j)+ki(j-1))+sh(j,1)
+         BT1(j) =  C1i*(ki(j+1)+2d0*ki(j)+ki(j-1)) &
+                  +sh(j,1)*hi_b(1)*dzi
          CT1(j) = -C1i*(ki(j+1)+ki(j))
-         DT0(j) =  C3i*R(j)+sh(j,0)*theta(j,0) &
+         DT0(j) =  C3i*R(j)+sh(j,0)*tiold(j)*hi_b(0)*dzi &
                   -lh(j,1)+lh(j,0)
 
          IF (w(j) .GT. 0d0) THEN
-            AT1(j) = AT1(j) - C2i*w(j)*sh(j-1,1)
-            DT0(j) = DT0(j) + C2i*w(j)*lh(j-1,1)
+            AT1(j) = AT1(j) - C2i*w(j)*sh(j-1,1) * hi_b(1)
+            DT0(j) = DT0(j) + C2i*w(j)*lh(j-1,1) / dzi
          ELSE
-            BT1(j) = BT1(j) - C2i*w(j)*sh(j,1)
-            DT0(j) = DT0(j) + C2i*w(j)*lh(j,1)
+            BT1(j) = BT1(j) - C2i*w(j)*sh(j,1) * hi_b(1)
+            DT0(j) = DT0(j) + C2i*w(j)*lh(j,1) / dzi
          ENDIF
          IF (w(j+1) .GT. 0d0) THEN
-            BT1(j) = BT1(j) + C2i*w(j+1)*sh(j,1)
-            DT0(j) = DT0(j) - C2i*w(j+1)*lh(j,1)
+            BT1(j) = BT1(j) + C2i*w(j+1)*sh(j,1) * hi_b(1)
+            DT0(j) = DT0(j) - C2i*w(j+1)*lh(j,1) / dzi
          ELSE
-            CT1(j) = CT1(j) + C2i*w(j+1)*sh(j+1,1)
-            DT0(j) = DT0(j) - C2i*w(j+1)*lh(j+1,1)
+            CT1(j) = CT1(j) + C2i*w(j+1)*sh(j+1,1) * hi_b(1)
+            DT0(j) = DT0(j) - C2i*w(j+1)*lh(j+1,1) / dzi
          ENDIF
       ENDDO
 
          AT1(ni-1) = -C1i/3d0*(3d0*ki(ni-2)+3d0*ki(ni-1)+2d0*ki(ni))
          BT1(ni-1) =  C1i/3d0*(3d0*ki(ni-2)+3d0*ki(ni-1)+18d0*ki(ni)) &
-                     +sh(ni-1,1)
+                     +sh(ni-1,1)*hi_b(1)*dzi
          CT1(ni-1) = -C1i/3d0*16d0*ki(ni)
-         DT0(ni-1) =  C3i*R(ni-1)+sh(ni-1,0)*theta(ni-1,0) &
+         DT0(ni-1) =  C3i*R(ni-1)+sh(ni-1,0)*tiold(ni-1)*hi_b(0)*dzi &
                      -lh(ni-1,1)+lh(ni-1,0)
 
       IF (w(ni-1) .GT. 0d0) THEN
-         AT1(ni-1) = AT1(ni-1) - C2i*w(ni-1)*sh(ni-2,1)
-         DT0(ni-1) = DT0(ni-1) + C2i*w(ni-1)*lh(ni-2,1)
+         AT1(ni-1) = AT1(ni-1) - C2i*w(ni-1)*sh(ni-2,1) * hi_b(1)
+         DT0(ni-1) = DT0(ni-1) + C2i*w(ni-1)*lh(ni-2,1) / dzi
       ELSE
-         BT1(ni-1) = BT1(ni-1) - C2i*w(ni-1)*sh(ni-1,1)
-         DT0(ni-1) = DT0(ni-1) + C2i*w(ni-1)*lh(ni-1,1)
+         BT1(ni-1) = BT1(ni-1) - C2i*w(ni-1)*sh(ni-1,1) * hi_b(1)
+         DT0(ni-1) = DT0(ni-1) + C2i*w(ni-1)*lh(ni-1,1) / dzi
       ENDIF
       IF (w(ni) .GT. 0d0) THEN
-         BT1(ni-1) = BT1(ni-1) + C2i*w(ni)*sh(ni-1,1)
-         DT0(ni-1) = DT0(ni-1) - C2i*w(ni)*lh(ni-1,1)
+         BT1(ni-1) = BT1(ni-1) + C2i*w(ni)*sh(ni-1,1) * hi_b(1)
+         DT0(ni-1) = DT0(ni-1) - C2i*w(ni)*lh(ni-1,1) / dzi
       ELSE
-         CT1(ni-1) = CT1(ni-1) + C2i*w(ni)*sh(ni,1)
-         DT0(ni-1) = DT0(ni-1) - C2i*w(ni)*lh(ni,1)
+         CT1(ni-1) = CT1(ni-1) + C2i*w(ni)*sh(ni,1) * hi_b(1)
+         DT0(ni-1) = DT0(ni-1) - C2i*w(ni)*lh(ni,1) / dzi
       ENDIF
 
      if (hs_b(0)>hscut) then
-      PT1	= (    -ki(ni)/3d0/hi_b(1)/hi_b(1)/dzi)
-      AT1(ni)	= ( 9d0*ki(ni)/3d0/hi_b(1)/hi_b(1)/dzi)
+      PT1	= (    -ki(ni)/3d0/hi_b(1)/dzi)
+      AT1(ni)	= ( 9d0*ki(ni)/3d0/hi_b(1)/dzi)
 !FD add case for nlsno=1
       if ( nlsno == 1 ) then
-       BT1(ni)	= (-8d0*ki(ni)/3d0/hi_b(1)/hi_b(1)/dzi)+ &
-                  (-2d0*ks(ni)/hs_b(1)/hs_b(1) * hs_b(1)/hi_b(1))
-       CT1(ni)	= ( 2d0*ks(ni)/hs_b(1)/hs_b(1))
+       BT1(ni)	= (-8d0*ki(ni)/3d0/hi_b(1)/dzi)+ &
+                  (-2d0*ks(ni)/hs_b(1))
+       CT1(ni)	= ( 2d0*ks(ni)/hs_b(1))
        QT1	= ( 0.d0)
       else 
-       BT1(ni)	= (-8d0*ki(ni)/3d0/hi_b(1)/hi_b(1)/dzi)+ &
-                  (-8d0*ks(ni)/3d0/hs_b(1)/hs_b(1)/dzs * hs_b(1)/hi_b(1))
-       CT1(ni)	= ( 9d0*ks(ni)/3d0/hs_b(1)/hs_b(1)/dzs)
-       QT1	= (-ks(ni)/3d0/hs_b(1)/hs_b(1)/dzs)
+       BT1(ni)	= (-8d0*ki(ni)/3d0/hi_b(1)/dzi)+ &
+                  (-8d0*ks(ni)/3d0/hs_b(1)/dzs)
+       CT1(ni)	= ( 9d0*ks(ni)/3d0/hs_b(1)/dzs)
+       QT1	= (-ks(ni)/3d0/hs_b(1)/dzs)
       endif
 
       DT0(ni)	= ( 0d0)
 
 !FD add case for nlsno=1
       if ( nlsno == 1 ) then
-       AT1(ni+1) = -C1s*(2d0*ks(ni)) * hs_b(1)/hi_b(1)
+       AT1(ni+1) = -C1s*(2d0*ks(ni))
        BT1(ni+1) =  C1s*(2d0*ks(ni)+2d0*ks(ns)) &
-                  +sh(ni+1,1)
+                  +sh(ni+1,1)*hs_b(1)*dzs
        CT1(ni+1) = -C1s*(2d0*ks(ns))
-       DT0(ni+1) =  C3s*R(ni+1)+sh(ni+1,0)*theta(ni+1,0) &
+       DT0(ni+1) =  C3s*R(ni+1)+sh(ni+1,0)*tiold(ni+1)*hs_b(0)*dzs &
                   -lh(ni+1,1)+lh(ni+1,0)
       else
-       AT1(ni+1) = -C1s/3d0*16d0*ks(ni) * hs_b(1)/hi_b(1)
-! FD is it a bug?
-! FD from the manual this should be
-! FD C1s/3*(18*ks(ni)+3*ks(ni+1)+3*ks(ni+2))
-! FD       BT1(ni+1) =  C1s/3d0*(3d0*ks(ni)+3d0*ks(ni+1)+18d0*ks(ni+2)) &
+       AT1(ni+1) = -C1s/3d0*16d0*ks(ni)
        BT1(ni+1) =  C1s/3d0*(18d0*ks(ni)+3d0*ks(ni+1)+3d0*ks(ni+2)) &
-                  +sh(ni+1,1)
+                  +sh(ni+1,1)*hs_b(1)*dzs
        CT1(ni+1) = -C1s/3d0*(3d0*ks(ni+2)+3d0*ks(ni+1)+2d0*ks(ni))
-       DT0(ni+1) =  C3s*R(ni+1)+sh(ni+1,0)*theta(ni+1,0) &
+       DT0(ni+1) =  C3s*R(ni+1)+sh(ni+1,0)*tiold(ni+1)*hs_b(0)*dzs &
                   -lh(ni+1,1)+lh(ni+1,0)
       endif
 
-!!!! FD w at the interface always zero !!!
-! FD      IF (w(ni) .GT. 0d0) THEN
-! FD         AT1(ni+1) = AT1(ni+1) - C2s*w(ni)*sh(ni,1) * hs_b(1)/hi_b(1)
-! FD         DT0(ni+1) = DT0(ni+1) + C2s*w(ni)*lh(ni,1)
-! FD      ELSE
-! FD         BT1(ni+1) = BT1(ni+1) - C2s*w(ni)*sh(ni+1,1)
-! FD         DT0(ni+1) = DT0(ni+1) + C2s*w(ni)*lh(ni+1,1)
-! FD      ENDIF
       IF (w(ni+1) .GT. 0d0) THEN
-         BT1(ni+1) = BT1(ni+1) + C2s*w(ni+1)*sh(ni+1,1)
-         DT0(ni+1) = DT0(ni+1) - C2s*w(ni+1)*lh(ni+1,1)
+         BT1(ni+1) = BT1(ni+1) + C2s*w(ni+1)*sh(ni+1,1) * hs_b(1)
+         DT0(ni+1) = DT0(ni+1) - C2s*w(ni+1)*lh(ni+1,1) / dzs
       ELSE
-         CT1(ni+1) = CT1(ni+1) + C2s*w(ni+1)*sh(ni+2,1)
-         DT0(ni+1) = DT0(ni+1) - C2s*w(ni+1)*lh(ni+2,1)
+         CT1(ni+1) = CT1(ni+1) + C2s*w(ni+1)*sh(ni+2,1) * hs_b(1)
+         DT0(ni+1) = DT0(ni+1) - C2s*w(ni+1)*lh(ni+2,1) / dzs
       ENDIF
 
 
@@ -922,24 +790,25 @@ Tdiff=1d-12
 
       DO j=ni+2,ns-2
             AT1(j) = -C1s*(ks(j)+ks(j-1))
-            BT1(j) =  C1s*(ks(j+1)+2d0*ks(j)+ks(j-1))+sh(j,1)
+            BT1(j) =  C1s*(ks(j+1)+2d0*ks(j)+ks(j-1))&
+                     +sh(j,1)*hs_b(1)*dzs
             CT1(j) = -C1s*(ks(j+1)+ks(j))
-            DT0(j) =  C3s*R(j)+sh(j,0)*theta(j,0) &
+            DT0(j) =  C3s*R(j)+sh(j,0)*tiold(j)*hs_b(0)*dzs &
                      -lh(j,1)+lh(j,0)
 
          IF (w(j-1) .GT. 0d0) THEN
-            AT1(j) = AT1(j) - C2s*w(j-1)*sh(j-1,1)
-            DT0(j) = DT0(j) + C2s*w(j-1)*lh(j-1,1)
+            AT1(j) = AT1(j) - C2s*w(j-1)*sh(j-1,1) * hs_b(1)
+            DT0(j) = DT0(j) + C2s*w(j-1)*lh(j-1,1) / dzs
          ELSE
-            BT1(j) = BT1(j) - C2s*w(j-1)*sh(j,1)
-            DT0(j) = DT0(j) + C2s*w(j-1)*lh(j,1)
+            BT1(j) = BT1(j) - C2s*w(j-1)*sh(j,1) * hs_b(1)
+            DT0(j) = DT0(j) + C2s*w(j-1)*lh(j,1) / dzs
          ENDIF
          IF (w(j) .GT. 0d0) THEN
-            BT1(j) = BT1(j) + C2s*w(j)*sh(j,1)
-            DT0(j) = DT0(j) - C2s*w(j)*lh(j,1)
+            BT1(j) = BT1(j) + C2s*w(j)*sh(j,1) * hs_b(1)
+            DT0(j) = DT0(j) - C2s*w(j)*lh(j,1) / dzs
          ELSE
-            CT1(j) = CT1(j) + C2s*w(j)*sh(j+1,1)
-            DT0(j) = DT0(j) - C2s*w(j)*lh(j+1,1)
+            CT1(j) = CT1(j) + C2s*w(j)*sh(j+1,1) * hs_b(1)
+            DT0(j) = DT0(j) - C2s*w(j)*lh(j+1,1) / dzs
          ENDIF
       ENDDO
 
@@ -947,24 +816,24 @@ Tdiff=1d-12
       if ( nlsno > 1 ) then
          AT1(ns-1) = -C1s/3d0*(3d0*ks(ns-2)+3d0*ks(ns-1)+2d0*ks(ns))
          BT1(ns-1) =  C1s/3d0*(3d0*ks(ns-2)+3d0*ks(ns-1)+18d0*ks(ns)) &
-                     +sh(ns-1,1)
+                     +sh(ns-1,1)*hs_b(1)*dzs
          CT1(ns-1) = -C1s/3d0*16d0*ks(ns)
-         DT0(ns-1) =  C3s*R(ns-1)+sh(ns-1,0)*theta(ns-1,0) &
+         DT0(ns-1) =  C3s*R(ns-1)+sh(ns-1,0)*tiold(ns-1)*hs_b(0)*dzs &
                      -lh(ns-1,1)+lh(ns-1,0)
 
       IF (w(ns-2) .GT. 0d0) THEN
-         AT1(ns-1) = AT1(ns-1) - C2s*w(ns-2)*sh(ns-2,1)
-         DT0(ns-1) = DT0(ns-1) + C2s*w(ns-2)*lh(ns-2,1)
+         AT1(ns-1) = AT1(ns-1) - C2s*w(ns-2)*sh(ns-2,1) * hs_b(1)
+         DT0(ns-1) = DT0(ns-1) + C2s*w(ns-2)*lh(ns-2,1) / dzs
       ELSE
-         BT1(ns-1) = BT1(ns-1) - C2s*w(ns-2)*sh(ns-1,1)
-         DT0(ns-1) = DT0(ns-1) + C2s*w(ns-2)*lh(ns-1,1)
+         BT1(ns-1) = BT1(ns-1) - C2s*w(ns-2)*sh(ns-1,1) * hs_b(1)
+         DT0(ns-1) = DT0(ns-1) + C2s*w(ns-2)*lh(ns-1,1) / dzs
       ENDIF
       IF (w(ns-1) .GT. 0d0) THEN
-         BT1(ns-1) = BT1(ns-1) + C2s*w(ns-1)*sh(ns-1,1)
-         DT0(ns-1) = DT0(ns-1) - C2s*w(ns-1)*lh(ns-1,1)
+         BT1(ns-1) = BT1(ns-1) + C2s*w(ns-1)*sh(ns-1,1) * hs_b(1)
+         DT0(ns-1) = DT0(ns-1) - C2s*w(ns-1)*lh(ns-1,1) / dzs
       ELSE
-         CT1(ns-1) = CT1(ns-1) + C2s*w(ns-1)*sh(ns,1)
-         DT0(ns-1) = DT0(ns-1) - C2s*w(ns-1)*lh(ns,1)
+         CT1(ns-1) = CT1(ns-1) + C2s*w(ns-1)*sh(ns,1) * hs_b(1)
+         DT0(ns-1) = DT0(ns-1) - C2s*w(ns-1)*lh(ns,1) / dzs
       ENDIF
       endif ! end nlsno > 1
 
@@ -974,23 +843,23 @@ Tdiff=1d-12
        AT1(ns)	= ( 2d0*ks(ns))
        BT1(ns)	= (-2d0*ks(ns) &
                    -C4s *                     dzf )
-       DT0(ns)	=  -C4s * hs_b(1) * ( Fnet0 + dzf*tiold(ns) )
+       DT0(ns)	=  -C4s * ( Fnet0 + dzf*tiold(ns) )
       else
        PT1	= (-1d0*ks(ns))
        AT1(ns)	= ( 9d0*ks(ns))
        BT1(ns)	= (-8d0*ks(ns) &
                    -C4s *                     dzf )
-       DT0(ns)	=  -C4s * hs_b(1) * ( Fnet0 + dzf*tiold(ns) )
+       DT0(ns)	=  -C4s * ( Fnet0 + dzf*tiold(ns) )
       endif ! end nlsno = 1
 
       IF (sbc .EQ. 'flux' .AND. Tsbc) THEN
        AT1(ns)	= 0d0
        BT1(ns)	= 1d0
-       DT0(ns)	= Tf(ns)*hs_b(1)
+       DT0(ns)	= Tf(ns)
       ELSEIF (sbc .EQ. 'fixT') THEN
        AT1(ns)	= 0d0
        BT1(ns)	= 1d0
-       DT0(ns)	= Tsurf*hs_b(1)
+       DT0(ns)	= Tsurf
       ELSEIF (temp(ns,1) .LT. Tf(ns) .OR. &
               temp(ns,1)+tiny .GE. Tf(ns) .AND.  &
              -Fnet-Fcss .GT. 0d0        ) THEN
@@ -1014,19 +883,19 @@ Tdiff=1d-12
       CT1(ni) = CT1(ni)*AT1(ni-1)
       DT0(ni) = DT0(ni)*AT1(ni-1)-PT1*DT0(ni-1)
 
-       AT1(ni+1) =  ks(ns) * hs_b(1)/hi_b(1)
+       AT1(ni+1) =  ks(ns)
        BT1(ni+1) = -ks(ns) &
                    -C4s *                     dzf
-       DT0(ni+1) = -C4s * hs_b(1) * ( Fnet0 + dzf*tiold(ns) )
+       DT0(ni+1) = -C4s * ( Fnet0 + dzf*tiold(ns) )
 
       IF (sbc .EQ. 'flux' .AND. Tsbc) THEN
          AT1(ni+1) = 0d0
          BT1(ni+1) = 1d0
-         DT0(ni+1) = Tf(ns)*hs_b(1)
+         DT0(ni+1) = Tf(ns)
       ELSEIF (sbc .EQ. 'fixT') THEN
          AT1(ni+1) = 0d0
          BT1(ni+1) = 1d0
-         DT0(ni+1) = Tsurf*hs_b(1)
+         DT0(ni+1) = Tsurf
       ELSEIF (temp(ns,1) .LT. Tf(ns) .OR. &
               temp(ns,1)+tiny .GE. Tf(ns) .AND.  &
               -Fnet-Fcss .GT. 0d0        ) THEN
@@ -1041,17 +910,17 @@ Tdiff=1d-12
          PT1	= (-1d0*ki(ni))
          AT1(ni)= ( 9d0*ki(ni))
          BT1(ni)= (-8d0*ki(ni) &
-                   -C4i*                    dzf )
-         DT0(ni)=  -C4i*hi_b(1) * ( Fnet0 + dzf*tiold(ni) )
+                   -C4i *                     dzf )
+         DT0(ni)=  -C4i * ( Fnet0 + dzf*tiold(ni) )
 
       IF (sbc .EQ. 'flux' .AND. Tsbc) THEN
         AT1(ni)	= 0d0
         BT1(ni)	= 1d0
-        DT0(ni)	= Tf(ni)*hi_b(1)
+        DT0(ni)	= Tf(ni)
       ELSEIF (sbc .EQ. 'fixT') THEN
         AT1(ni)	= 0d0
         BT1(ni)	= 1d0
-        DT0(ni)	= Tsurf*hi_b(1)
+        DT0(ni)	= Tsurf
       ELSEIF (temp(ni,1) .LT. Tf(ni) .OR. &
               temp(ni,1)+tiny .GE. Tf(ni) .AND.  &
               -Fnet-Fcis .GT. 0d0        ) THEN
@@ -1076,33 +945,32 @@ Tdiff=1d-12
      endif
 
       DO j=0,ni
-         theta(j,1) = tout(j)
-         temp(j,1) = theta(j,1)/hi_b(1)
+         temp(j,1) = tout(j)
       ENDDO
 !FD is snow layers
      if (hs_b(0)>hscut) then
       DO j=ni+1,ns
-         theta(j,1) = tout(j)
-         temp(j,1) = theta(j,1)/hs_b(1)
+         temp(j,1) = tout(j)
       ENDDO
      else if ( hs_b(0) <=hscut .and. hs_b(0) > hslim ) then ! FD thin snow
          j=ni+1
-         theta(j,1) = tout(j)
-         temp(j,1) = theta(j,1)/hs_b(1)
+         temp(j,1) = tout(j)
       DO j=ni+2,ns
          temp(j,1) = temp(ni+1,1)
-         theta(j,1) = 0.d0
       ENDDO
      else if ( hs_b(0) <= hslim ) then ! FD no snow
       DO j=ni+1,ns
          temp(j,1) = temp(ni,1)
-         theta(j,1) = 0.d0
       ENDDO
      endif
 
       IF ((temp(ns,1) .GT. Tf(ns)) .AND. (Tsbc .EQV. .FALSE.)) THEN
          Tsbc = .TRUE. 
          GOTO 3000				! recalc T with fixT surf-BC
+      ENDIF
+      IF ( temp(ns,1)+tiny .GE. Tf(ns) .AND. -Fnet-Fcss .GT. 0d0 ) THEN
+         Tsbc = .FALSE.
+         GOTO 3000				! recalc T with flux surf-BC
       ENDIF
 
          DO j=0,ns
@@ -1136,13 +1004,13 @@ Tdiff=1d-12
          ki(j)   = func_ki(sali(j,1),temp(j,1))
          qm(j)   = func_qm(Tf(j),temp(j,1))
          sh(j,1) = func_sh(Tf(j),temp(j,1))
-         lh(j,1) = func_lh(Tf(j),temp(j,1))*hi_b(1)
+         lh(j,1) = func_lh(Tf(j),temp(j,1))*hi_b(1)*dzi
       ENDDO
       DO j=ni+1,ns
          Tf(j)   = Tfreeze1(sali(j,1))
          qm(j)   = func_qm(Tf(j),temp(j,1))
          sh(j,1) = func_sh(Tf(j),temp(j,1))
-         lh(j,1) = func_lh(Tf(j),temp(j,1))*hs_b(1)
+         lh(j,1) = func_lh(Tf(j),temp(j,1))*hs_b(1)*dzs
       ENDDO
 
 !-----------------------------------------------------------------------
@@ -1272,13 +1140,13 @@ endif
       Eint = 0d0
 
       DO j=1,ni-1
-         Elay = func_El(Tf(j),temp(j,1))*hi_b(1)*rhoi*dzi
+         Elay = func_El(Tf(j),temp(j,1))*hi_b(1)*rhoice*dzi
          Eint = Eint+Elay
       ENDDO
 ! FD debug     if (hs_b(0)>hscut) then
      if (hs_b(0) > hslim) then
        DO j=ni+1,ns-1
-         Elay = func_El(Tf(j),temp(j,1))*hs_b(1)*rhos*dzs
+         Elay = func_El(Tf(j),temp(j,1))*hs_b(1)*rhosno*dzs
          Eint = Eint+Elay
       ENDDO
      endif
@@ -1287,6 +1155,18 @@ endif
 ! FD debug
 if (debug) write(*,*) 'energy',Einp,dEin
 
+! FD debug if energy not conserved
+!      IF ( abs(Einp-dEin) > 1e-3 ) THEN
+!       OPEN(1,file='restart.dat')
+!       WRITE(1,*) nlice,nlsno
+!       WRITE(1,*) ti(1:nlice),ts(1:nlsno+1),tsu,tbo
+!       WRITE(1,*) si(1:nlice)
+!       WRITE(1,*) hi,hs
+!       WRITE(1,*) snowfall,dwnlw,tsu,tair,qair,uair,swrad,oceflx
+!       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
+!       CLOSE(1)
+!       STOP 'energy not conserved'
+!      ENDIF
 
 !     WARNING NI WAS INVENTED FOR TEMPERATURE POINTS WHICH ALSO EXISTS
 !     AT THE INTERFACE OF THE ICE AND SNOW, AT THE ICE BASE AND ICE SURFACE
@@ -1309,9 +1189,6 @@ if (debug) write(*,*) 'energy',Einp,dEin
       IF (dibdt .LT. 0d0) gbase = gbase-dibdt*dtice
       IF (dibdt .GT. 0d0) mbase = mbase+dibdt*dtice
       
-      himax = MAX(himax,hi_b(1))
-      himin = MIN(himin,hi_b(1))
-     
 !-----------------------------------------------------------------------
 !     Reset prognostic variables
 !-----------------------------------------------------------------------
@@ -1331,7 +1208,6 @@ endif
          sali(j,0) = sali(j,1)
          hsali(j,0) = hsali(j,1)
          temp(j,0) = temp(j,1)
-         theta(j,0) = theta(j,1)
          sh(j,0) = sh(j,1)
          lh(j,0) = lh(j,1)
       ENDDO
