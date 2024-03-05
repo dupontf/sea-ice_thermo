@@ -186,12 +186,12 @@ subroutine ice_thermo_FE(dtice)
   integer    k,l
   integer    lice_top
   double precision, dimension(0:maxlay) :: &
-             rhs, a, b, diag, wmesh, wold, sali
+             rhs, a, b, diag, wmesh, wold, a1,b1,c1,d1
   double precision, dimension(maxlay) :: &
              kice, &
              he, heold, henew, &
              re, tme, dhe, &
-             em, cm, qm, km, rad
+             em, cm, qm, km, rad, sali
   double precision blhf, &
              submer_is, hdraft, sice, dhi, dhs, dq, &
              m1, m2, k1, theta_ther, eps, topflux, sum0, alb, estef, hmelt, &
@@ -520,11 +520,16 @@ if (debug) write(*,*) 'topflux',topflux,' botflux',-bshf
        sume2 = sume2 + heold(k) * qm(k) * re(k)
      enddo
 
-  if (ftot>sume2) then
-     call degrade_to_one_layer_uniform( &
-             dtice,lice_top,&
-             re,qm,tme,heold,tiold,tinew,fnet,bshf,hiold,hsold,&
-             fwf,hinew,hsnew,sstz,heat_melt_to_ocean)
+  if ( ftot>(-sume) .or. sstz>tme(ns) ) then
+     call degrade_to_two_layer_uniform(  &
+                lice_top,&
+                re,em,tme,heold,tiold,tinew,topflux,bshf,sali,&
+                fwf,hinew,hsnew,sstz,dtice,wmesh,theta_ther)
+     iteration = 0
+     rhs(0:ns) = 0.d0
+     flux2     = 0.d0
+     he(   1:ni) = hinew*dzi(   1:ni)
+     he(ni+1:ns) = hsnew*dzi(ni+1:ns)
      goto 2000 ! finalize and leave
   endif
 
@@ -634,7 +639,6 @@ k=lice_top
 !---------------------------------------------------------------------
 ! tri-diagonal solver call
 
-! FD debug
 !if (debug) then
 !   write(*,'(20(1x,e10.3))') a(0:lice_top)
 !   write(*,'(20(1x,e10.3))') diag(0:lice_top)
@@ -703,28 +707,89 @@ k=0
 !   enddo
 
 ! FD need new condition for wmesh in snow and ice separately
-
     if (panic) then
      if (ns>2) then
 ! degrade to two layers (one for ice and one for snow)
-!      call degrade_to_two_layers(&
-!                lice_top,re,em,heold,tiold,sali,zi,dzi,p_remap,tme)
-! FD debug
-       OPEN(1,file='restart.dat')
-       WRITE(1,*) nlice,nlsno
-       WRITE(1,*) tiold(0:nlice+nlsno)
-       WRITE(1,*) si(1:nlice)
-       WRITE(1,*) hi,hs
-       WRITE(1,*) snowfall,dwnlw,tsu,tair,qair,uair,swrad,oceflx,seasal
-       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
-       CLOSE(1)
-       STOP
+      call degrade_to_two_layers(&
+                lice_top,re,em,heold,tiold,sali,zi,dzi,p_remap,tme)
+!! FD debug
+!       OPEN(1,file='restart.dat')
+!       WRITE(1,*) nlice,nlsno
+!       WRITE(1,*) tiold(0:nlice+nlsno)
+!       WRITE(1,*) si(1:nlice)
+!       WRITE(1,*) hi,hs
+!       WRITE(1,*) snowfall,dwnlw,tsu,tair,qair,uair,swrad,oceflx,seasal
+!       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
+!       CLOSE(1)
+!       STOP
+     tinew(0:ns)=tiold(0:ns)
+     he(1:ns)=heold(1:ns)
+     do k=1,ni
+!      tt = 0.25d0*(tiold(k-1)+tinew(k-1)+tiold(k)+tinew(k))
+      tt = 0.5d0*(tiold(k-1)+tiold(k)) ! both LIM3 and Huwald are not doing any fancier, so why not doing the same?
+      kice(k) = func_ki(sali(k),tt)      ! this can be move up and out of the iteration loop.
+    enddo
+    kice(ni+1:ns)=cond_sno
+
+     sume=0.d0
+     sume2=0.d0
+     do k=1,lice_top
+       sume = sume + heold(k) * em(k) * re(k)
+       sume2 = sume2 + heold(k) * qm(k) * re(k)
+     enddo
+
+!---------------------------------------------------------------------
+! latent heat calculation, sublimation processes and precipitation
+!---------------------------------------------------------------------
+
+      tsu    = tiold(lice_top) + tzero
+      ! net longwave radiative flux
+      netlw = emi*(dwnlw - stefa*tsu*tsu*tsu*tsu)
+      ! sensible and latent heat flux
+      CALL flx(hi,tsu,tair,qair,fsens, &
+     &         flat,q0,zrchu1,zrchu2,uair,zref)
+      fsens   =  -fsens
+      flat   =  MIN( -flat , 0.d0 ) ! always negative, as precip 
+                                           ! energy already added
+
+      ! pressure of water vapor saturation (Pa)
+      es         =  611.d0*10.d0**(9.5d0*(tsu-273.16d0)/(tsu-7.66d0))
+      ! intermediate variable
+      zssdqw     =  q0*q0*pres/ &
+     &              (0.622d0*es)*log(10.d0)*9.5d0* &
+     &              ((273.16d0-7.66d0)/(tsu-7.66d0)**2.d0)
+      ! derivative of the surface atmospheric net flux
+      dzf    =  4.d0*emi*stefa*tsu*tsu*tsu + zrchu1+zrchu2*zssdqw
+
+      ! surface atmospheric net flux
+      Fnet =  fac_transmi * swrad + netlw + fsens + flat
+if (debug) write(*,*) 'Fnet',Fnet,fac_transmi*swrad,netlw,fsens,flat,qair,q0,tair,tsu,uair,dzf
+
+!---------------------------------------------------------------------
+! recompute the internal radiation
+!---------------------------------------------------------------------
+      sumrad=0.d0
+      DO k=2,nlice
+         Rad(1) = rad(1) + rad(k)
+      ENDDO
+      rad(2)=0.d0
+      DO k=nlice+1,nlice+nlsno
+         Rad(2) = rad(2) + rad(k)
+      ENDDO
+      do k=1,lice_top
+         sumrad = sumrad + rad(k)
+      enddo
+
      else
-      call degrade_to_one_layer_uniform( &
-             dtice,lice_top,&
-             re,qm,tme,heold,tiold,tinew,fnet,bshf,hiold,hsold,&
-             fwf,hinew,hsnew,sstz,heat_melt_to_ocean)
-      exit
+      call degrade_to_two_layer_uniform(  &
+                lice_top,&
+                re,em,tme,heold,tiold,tinew,topflux,bshf,sali,&
+                fwf,hinew,hsnew,sstz,dtice,wmesh,theta_ther)
+      rhs(0:ns) = 0.d0
+      flux2     = 0.d0
+      he(   1:ni) = hinew*dzi(   1:ni)
+      he(ni+1:ns) = hsnew*dzi(ni+1:ns)
+      goto 2000
      endif
      wmesh=0.d0
      he   =heold
@@ -799,6 +864,10 @@ if (.not.thin_snow_active) &
 
    hsnew = max(hsold+dhs,0.d0)
    hinew = hiold+dhi
+! FD debug
+   if ( hinew < hminice ) then
+      hinew=hminice*0.9d0
+   endif
 
    he(   1:ni) = hinew*dzi(   1:ni)
    he(ni+1:ns) = hsnew*dzi(ni+1:ns)
@@ -835,6 +904,7 @@ if (.not.thin_snow_active) &
 !---------------------------------------------------------------------
 !---------------------------------------------------------------------
 
+2000 continue
 
 !---------------------------------------------------------------------
 ! freshwater and heat flux on melting to the ocean
@@ -887,7 +957,6 @@ if (energy_check) then
 !  if (fac>1d0) stop 'too large error'
 endif
 
-2000 continue
 !---------------------------------------------------------------------
 ! preparation for ocean thermodynamics
 
@@ -918,13 +987,12 @@ if ( p_remap(1) > 1 ) then
      lice_top = ns
    endif
 endif
-
 !---------------------------------------------------------------------
 ! FD debug
-!if (debug) then
-!  write(*,'(i4,20(1x,e10.3))') iteration,wmesh(0:ns)
-!  write(*,'(i4,20(1x,e10.3))') iteration,tinew(0:ns)
-!endif
+if (debug) then
+  write(*,'(i4,20(1x,e10.3))') iteration,wmesh(0:ns)
+  write(*,'(i4,20(1x,e10.3))') iteration,tinew(0:ns)
+endif
 
    hi=hinew
    hs=hsnew
@@ -988,7 +1056,6 @@ endif
      enddo
 !write(*,*) 'ice heat flux',bshf
 
-
 !because of potential change in steric height due to the presence of the ice, 
 !we assume that the ice is not impacting the volume of water, hence
 !the flux of volume between the ice and the ocean is set to zero,
@@ -1009,7 +1076,6 @@ end subroutine ice_thermo_FE
    double precision em(maxlay),ti(0:maxlay),si(maxlay)
    integer k
    double precision ztmelts,zaaa,zbbb,zccc,zdiscrim,tt
-  double precision,save :: mlfus = 0.334d6        ! J/kg latent heat of fusion
       !-------------------
       ! Ice temperatures
       !-------------------
@@ -1023,9 +1089,9 @@ end subroutine ice_thermo_FE
              zccc       =  mlfus * ztmelts
              zdiscrim   =  SQRT( MAX(zbbb*zbbb - 4.d0*zaaa*zccc,0.d0) )
              tt = ( - zbbb - zdiscrim ) / ( 2.d0 *zaaa )
-             tt = MIN( -0.01d0, MAX(-80d0, tt ) )
+             tt = MIN( ztmelts, MAX(-80d0, tt ) )
              ti(k) = 2.d0 * tt - ti(k-1)
-! FD debug             write(*,*) k,ti(k),ti(k-1),tt
+! FD debug   write(*,*) k,ti(k),ti(k-1),tt,em(k)
          END DO
 
    end subroutine invert_energy_all
@@ -1059,142 +1125,97 @@ end subroutine cal_energy
 
 !****************************************************************
 !
-subroutine degrade_to_one_layer_uniform(  &
-                dtice,lice_top,&
-                re,qm,tme,heold,tiold,tinew,fnet,bshf,hiold,hsold,&
-                fwf,hinew,hsnew,sstz,heat_melt_to_ocean)
+subroutine degrade_to_two_layer_uniform(  &
+                lice_top,&
+                re,em,tme,heold,tiold,tinew,topflux,bshf,si,&
+                fwf,hinew,hsnew,sstz,dtice,wmesh,theta_ther)
 !
 !****************************************************************
  implicit none
 ! arguments
  integer lice_top
- double precision, dimension(maxlay) :: re, qm, tme, heold
+ double precision, dimension(maxlay) :: re, em, tme, heold, si
  double precision, dimension(0:maxlay) :: tinew, tiold, wmesh
- double precision fnet,bshf,heat_melt_to_ocean, &
-                  hiold, hsold, fwf, hinew, hsnew, sstz,dtice
+ double precision ftot,topflux,bshf,heat_melt_to_ocean, &
+                  fwf,hinew,hsnew,dhs,hminice,sstz,dtice, &
+                  theta_ther
 ! local
- double precision sume, dq, dhi, dhs, hmelt, ftot, &
-    hdraft, submer_is, sim
+ double precision sume, dq, dhi, hmelt, sumh, sumr, sums, tt, efus, sum2, fac
  integer k
-! parameters
-  double precision,save :: cheat=4.2174d3*1.025d3  ! J/K/m3
 
-     tinew=tiold
-
-!------------------------------------------------
-! first try to get rid of the snow:
-! no snow precipitation assumed during this step
-!------------------------------------------------
-
-     sume=0.d0
-     do k=ni+1,ns
-      sume = sume + heold(k) * qm(k) * re(k)
-     enddo
-
-      dq  = min( sume, Fnet * dtice )! energy (positive) required to melt the snow (in entirity if Fnet large enough)
-      dhs = dq / sume * hsold ! melted snow thickness
-      hmelt = dhs * rhosno / rhowat
-
-      hsnew = max( hsold - dhs, 0.d0 )
-      Fnet = Fnet - dq / dtice ! reduce Fnet for the ice step
-
-!------------------------------------------------
-! second try to melt as much of the ice as possible
-!------------------------------------------------
-
-      sim=0.D0
-      do k=1,lice_top
-        sim=si(k)*heold(k)
-      enddo
-      sim=sim/hiold
-
-      sume=0.d0
-      do k=1,ni
-       sume = sume + heold(k) * qm(k) * re(k)
-      enddo
-
-      ftot = dtice * ( Fnet - bshf )
-      dq  = min( sume, ftot * dtice )! energy (positive) required to melt the snow (in entirity if Fnet large enough)
-      dhi = dq / sume * hiold
-      hinew = max( hiold - dhi, 0.d0 )
-
-      hmelt = dhi * rhoice / rhowat
-      heat_melt_to_ocean   = ftot - dq / dtice     ! surplus of energy to be given to ocean
-!       heat_melt_to_ocean = heat_melt_to_ocean  + dq/dtice              ! change in heat flux to ocean
-
-      hmelt = ( dhi * rhoice + dhs * rhosno ) / rhowat
-      fwf = fwf + hmelt / dtice
-      heat_melt_to_ocean = heat_melt_to_ocean + hmelt * (tme(1)-sstz) * Cheat / dtice   ! heat of melt water
-!       heat_melt_to_ocean = heat_melt_to_ocean  + dq/dtice              ! change in heat flux to ocean
-
-!------------------------------------------------
-! possible pathological case: no ice left but some remaining snow: 
-!  use the Archimede rules to improve the problem
-! !!!! no energy conservation satisfied in this case !!!!!!!!!
-!------------------------------------------------
-
-! 1) Archimedes: displaced water
-      hdraft=(rhosno*hsnew+hinew*rhoice)/rhowat
-      submer_is=hdraft-min(hdraft,hinew)
-
-! 2) submerging (flooding)  
-! nadja2001 changed: submerged snow converted to ice w/o freezing seawater 
-
-! Increase in mean ice thickness due to flooding (ice from submerged snow)
-      hinew = hinew + min(hs,submer_is*rhoice/rhosno*(1.d0-sim/sref))
-
-! Subtract from snow layer
-      hsnew = hsnew - submer_is
-
-
-end subroutine degrade_to_one_layer_uniform
-
-!****************************************************************
-!
-subroutine degrade_to_one_layer(&
-                maxlay,lice_top,maxlay_snow,re,em,heold,tiold,si,zi,dzi, &
-                p_remap,tme)
-!
-!****************************************************************
- implicit none
-! arguments
-  integer maxlay,lice_top,maxlay_snow
-  double precision, dimension(maxlay) :: re, em, heold, si, dzi, tme
-  double precision, dimension(0:maxlay) :: tiold, zi
-  integer, dimension(0:maxlay) :: p_remap
-! local
-  double precision sume, sumh, sim
-  integer k
-
+     wmesh=0.d0
      sume=0.d0
      sumh=0.d0
-     sim = 0.d0
-     do k=1,lice_top
+     sumr=0.d0
+     sums=0.d0
+     do k=1,ni
       sume = sume + heold(k) * em(k) * re(k)
       sumh = sumh + heold(k) * re(k)
-      sim  = sim  + heold(k) * re(k) * si(k)
+      sumr = sumr + heold(k) * re(k)
+      sums = sums + heold(k) * si(k) * re(k)
+     enddo
+     sumr = sumr / hi
+     sums = sums / sumh
+     theta_ther = 0.d0
+! snow layer
+     sum2 = sume
+     do k=ni+1,ns
+      sum2 = sum2 + heold(k) * em(k) * re(k)
      enddo
 
-     p_remap(1)=lice_top
-     heold(1)= sum(heold)
-! no snow please!
-     heold(2:maxlay)=0.d0
-     sume = sume/sumh
-     sim  = sim /sumh
-     lice_top=1
-     maxlay_snow=2
-     em(1)=sume
-     em(2:maxlay)=0.d0
-     si(1)=sim
-     dzi(1)=1.d0
-     zi(1)=1.d0
-     re(1)=sumh/heold(1)
-     tme(1)=tfreeze1(sim)
-! FD debug
-     call invert_energy_all(lice_top,em,tiold,si)
-write(*,*) 'one layer',em(1)*sumh,heold(1),si(1),tiold(0:lice_top)
+     ftot = dtice * ( topflux - bshf )
 
-end subroutine degrade_to_one_layer
+     if (ftot + sum2 > 0.d0 ) then ! total melt
+       hmelt = sumh / rhowat
+       fwf  = fwf  + hmelt / dtice  ! positive flux for input to ocean
+       dq   = ftot - sume     ! surplus of energy to be given to ocean
+!       heat_melt_to_ocean = heat_melt_to_ocean  + dq/dtice              ! change in heat flux to ocean
+       tinew = min(tme(1)-0.01d0,sstz)
+       hinew = 0.d0
+       hsnew = 0.d0
+       wmesh(0)=-hi/dtice
+       wmesh(ns)=hs/dtice
+     else
+! partial ice melt
+       efus = sume/sumh
+       call invert_energy_one(efus,sums,tt)
+       ftot = - bshf * dtice ! reverse sign for melting basal ice
+       fac = max( ftot / (-sume), 0.d0 )
+       dhi  = min(fac, 1.d0) * hi
+       hmelt = dhi * sumr
+       fwf  = fwf  + hmelt/dtice/rhowat  ! positive flux for input to ocean
+       dq = max( ftot + sume, 0.d0 )
+       hinew = hi - dhi
+       tinew(0:ni) = tt
+       wmesh(0)=-dhi/dtice
+! partial snow case
+! snow layer
+       sume = 0.d0
+       sumr = 0.d0
+       do k=ni+1,ns
+        sume = sume + heold(k) * em(k) * re(k)
+        sumr = sumr + heold(k) * re(k)
+       enddo
+       efus = sume/sumr
+       call invert_energy_one(efus,0.d0,tt)
+       if (nlsno==1) then
+         tinew(ni+1:ns) = 2.d0 * tt - tinew(ni) ! trick for nlnso=1
+       else
+         tinew(ni+1:ns) = tt
+       endif
+       sumr = sumr / hs
+       ftot = topflux * dtice + dq ! add remaining energy after melting ice to energy available for melting snow
+       fac = max ( ftot / (-sume), 0.d0 )
+       dhs  = min(fac, 1.d0) * hs
+       hmelt = dhs * sumr
+       fwf  = fwf  + hmelt/dtice/rhowat  ! positive flux for input to ocean
+       dq = max( ftot + sume, 0.d0 )
+       wmesh(ns)=dhs/dtice
+       hsnew = hs - dhs
+!       heat_melt_to_ocean = heat_melt_to_ocean  + dq/dtice              ! change in heat flux to ocean
+     endif
+
+end subroutine degrade_to_two_layer_uniform
 
 
 !****************************************************************
@@ -1214,6 +1235,7 @@ subroutine degrade_to_two_layers(&
   double precision sume, sumh, sim
   integer k
 
+!ice
      sume=0.d0
      sumh=0.d0
      sim = 0.d0
@@ -1230,6 +1252,8 @@ subroutine degrade_to_two_layers(&
      sim  = sim /sumh
      em(1)=sume
      si(1)=sim
+     re(1)=sumh/heold(1)
+     tme(1)=tfreeze1(sim)
 !snow
      heold(2)=heold(ns)
      em(2)   =em(ns)
@@ -1245,8 +1269,6 @@ subroutine degrade_to_two_layers(&
      zi(1)=1.d0
      dzi(2)=1.d0
      zi(2)=2.d0
-     re(1)=sumh/heold(1)
-     tme(1)=tfreeze1(sim)
 
      call invert_energy_all(lice_top,em,tiold,si)
 
