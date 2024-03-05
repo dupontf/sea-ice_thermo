@@ -206,18 +206,19 @@ subroutine ice_thermo_FE(dtice)
   integer, dimension(maxlay) :: p_res
 
   logical fixed_tb,melt_ts,melt_tb,panic
-  integer :: iteration, maxiter = 50
+  integer :: iteration, maxiter = 100
   double precision ftot2, sume2, flux2, pi, energy_snow_melt, &
             sublimation_speed, bottom_speed, rom
   logical :: energy_check=.false., thin_snow_active, debug=.false.
   double precision :: tseafrz, sumrad
-      double precision :: hslim=0.0005d0
+      double precision :: hslim=0.0005d0, hicut=1d-2
   double precision Fprec, ssnow ! heat flux due to precipitation [W/m2]
 
 
 !FD debug
 energy_check=.true.
 debug=.true.
+hslim=1d-3
 !---------------------------------------------------------------------
 ! other quantities
 !---------------------------------------------------------------------
@@ -415,7 +416,7 @@ if (debug) write(*,*) 'Fnet',Fnet,fac_transmi*swrad,netlw,fsens,flat,qair,q0,tai
       endif
       snow_precip = 0.d0
 ! FD debug
-write(*,*) 'hsold < hslim',hsold,dhs,Fnet,energy_snow_melt/dtice
+!write(*,*) 'hsold < hslim',hsold,dhs,Fnet,energy_snow_melt/dtice
 
     else !sublimation can be used too
 
@@ -426,7 +427,7 @@ write(*,*) 'hsold < hslim',hsold,dhs,Fnet,energy_snow_melt/dtice
       else
        dhs = snow_precip * dtice
 ! FD debug
-write(*,*) 'precip on no snow',dhs
+!write(*,*) 'precip on no snow',dhs
       endif
       ! recalculate the top flux
       Flat =  Flat - dq / dtice ! (-dq>0 so this is in effect reducing the latent heat)
@@ -654,7 +655,11 @@ k=lice_top
 
   if (melt_ts ) then
 k=lice_top
+  if (iteration.gt.10) then
+     wmesh(k) = 0.5d0 * wmesh(k) + 0.5d0 * rhs(k)
+  else
      wmesh(k) = rhs(k)
+  endif
      tinew(k) = tme(k)
      rhs  (k) = tinew(k) - tiold(k) ! needed for posterio diagnostic
   endif
@@ -718,7 +723,7 @@ endif
       melt_ts = .false.
       thin_snow_active = .true.
 ! FD debug
-write(*,*) 'wmesh(ns) < hsold', energy_snow_melt, hsold, dhs, wmesh(ns)*dtice
+!write(*,*) 'wmesh(ns) < hsold', energy_snow_melt, hsold, dhs, wmesh(ns)*dtice
       wmesh(ns)=hsold/dtice
       sumrad=0.d0
       do k=1,lice_top
@@ -869,6 +874,12 @@ endif
   enddo
  endif
 
+ if (hi .lt. hicut) then
+   hinew = hicut
+   tinew = tocn
+   he(   1:ni) = hinew*dzi(   1:ni)
+   he(ni+1:ns) = hsnew*dzi(ni+1:ns)
+endif
 !---------------------------------------------------------------------
 ! preparation for ocean thermodynamics
 
