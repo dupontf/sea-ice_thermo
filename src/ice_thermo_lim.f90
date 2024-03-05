@@ -135,7 +135,7 @@ hslim=0.0005d0
       ! 2.11 + 0.09 S/T - 0.011.T
 
       ! thermal conductivity in the snow
-      ztcond_i(0) = func_ki(si(1),ti(1)-tp0)
+      ztcond_i(0) = cond_ice ! FD debug func_ki(si(1),ti(1)-tp0)
 
       DO layer = 1, nlice-1
          sk = 0.5d0 * ( si(layer) + si(layer+1) )
@@ -276,19 +276,19 @@ hslim=0.0005d0
          zspeche_i(layer) = func_cp( tmelts, ti(layer)-tp0, &
                                          ztiold(layer)-tp0 )
       END DO
+! FD debug
+write(*,*) zspeche_i(nlice)
 !
 !------------------------------------------------------------------------------|
 !  6) eta factors                                                              |
 !------------------------------------------------------------------------------|
 !
       DO layer = 1, nlsno
-         zeta_s(layer) = dtice / max(rhosno*cp_ice*dzs(layer),zeps)
+         zeta_s(layer) = rhosno*cp_ice*dzs(layer) /  dtice
       END DO
 
       DO layer = 1, nlice
-        zeta_i(layer) = dtice / max(rhoice*dzi(layer) * &
-     &                  zspeche_i(layer)             &
-     &                  ,zeps)
+        zeta_i(layer) = rhoice*dzi(layer) * zspeche_i(layer) / dtice
       END DO
 
       zf=zf0+dzf*(tsu-tsu0)
@@ -316,20 +316,20 @@ hslim=0.0005d0
       END DO
       DO numeq = nlsno + 2, nlsno + nlice 
            layer = numeq - nlsno - 1
-           ztrid(numeq,1)   =  - zeta_i(layer)*zkappa_i(layer-1) 
-           ztrid(numeq,2)   =  1.d0 + zeta_i(layer)*(zkappa_i(layer-1) + &
-     &                       zkappa_i(layer))
-           ztrid(numeq,3)   =  - zeta_i(layer)*zkappa_i(layer)
-           zindterm(numeq)  =  ztiold(layer) + zeta_i(layer)* &
-     &                      swradab_i(layer)
+           ztrid(numeq,1)   =  - zkappa_i(layer-1) 
+           ztrid(numeq,2)   =  rhoice * dzi(layer) * zspeche_i(layer) / dtice &
+     &                      + zkappa_i(layer-1) + zkappa_i(layer)
+           ztrid(numeq,3)   =  - zkappa_i(layer)
+           zindterm(numeq)  =  rhoice * dzi(layer) * zspeche_i(layer) / dtice * ztiold(layer) + swradab_i(layer)
       END DO
       ! ice bottom terms
       numeq   =  nlsno + nlice + 1
-      ztrid(numeq,1)  =  - zeta_i(nlice)*zkappa_i(nlice-1)   
-      ztrid(numeq,2)  =  1.d0 + zeta_i(nlice)*( zkappa_i(nlice)*zg1 &
+      ztrid(numeq,1)  =  - zkappa_i(nlice-1)   
+      ztrid(numeq,2)  =  rhoice * dzi(nlice) * zspeche_i(nlice) / dtice & 
+     &                 + ( zkappa_i(nlice)*zg1 &
      &                   + zkappa_i(nlice-1) )
       ztrid(numeq,3)  =  0.d0
-      zindterm(numeq) =  ztiold(nlice) + zeta_i(nlice)* &
+      zindterm(numeq) =  rhoice * dzi(nlice) * zspeche_i(nlice) / dtice * ztiold(nlice) + &
      &                   ( swradab_i(nlice) &
      &                   + zkappa_i(nlice)*zg1 &
      &                   *tbo )
@@ -343,12 +343,11 @@ hslim=0.0005d0
       ! snow interior terms (bottom equation has the same form as the others)
       do numeq = 3, nlsno + 1
            layer =  numeq - 1
-           ztrid(numeq,1)   =  - zeta_s(layer)*zkappa_s(layer-1)
-           ztrid(numeq,2)   =  1.d0 + zeta_s(layer)*( zkappa_s(layer-1) + &
-     &                         zkappa_s(layer) )
-           ztrid(numeq,3)   =  - zeta_s(layer)*zkappa_s(layer)
-           zindterm(numeq)  =  ztsold(layer) + zeta_s(layer)* &
-     &                         swradab_s(layer)
+           ztrid(numeq,1)   =  - zkappa_s(layer-1)
+           ztrid(numeq,2)   =  rhosno * cp_ice * dzs(layer) / dtice & 
+     &                         + zkappa_s(layer-1) + zkappa_s(layer)
+           ztrid(numeq,3)   =  - zkappa_s(layer)
+           zindterm(numeq)  =  rhosno * cp_ice * dzs(layer) / dtice * ztsold(layer) + swradab_s(layer)
       end do
       
       ! case of only one layer in the ice (ice equation is altered)
@@ -374,10 +373,10 @@ hslim=0.0005d0
       zindterm(1) = dzf*tsu - zf
 
       ! first layer of snow equation
-      ztrid(2,1)  =  - zkappa_s(0)*zg1s*zeta_s(1)
-      ztrid(2,2)  =  1.d0 + zeta_s(1)*(zkappa_s(1) + zkappa_s(0)*zg1s)
-      ztrid(2,3)  =  - zeta_s(1)* zkappa_s(1)
-      zindterm(2) =  ztsold(1) + zeta_s(1)*swradab_s(1)
+      ztrid(2,1)  =  - zkappa_s(0)*zg1s
+      ztrid(2,2)  =  rhosno * cp_ice * dzs(1) / dtice + zkappa_s(1) + zkappa_s(0)*zg1s
+      ztrid(2,3)  =  - zkappa_s(1)
+      zindterm(2) =  rhosno * cp_ice * dzs(1) / dtice * ztsold(1) + swradab_s(1)
 
       else
 !
@@ -391,10 +390,9 @@ hslim=0.0005d0
 
       ! first layer of snow equation
       ztrid(2,1)  =  0.d0
-      ztrid(2,2)  =  1.d0 + zeta_s(1)*(zkappa_s(1) + zkappa_s(0)*zg1s)
-      ztrid(2,3)  =  - zeta_s(1)*zkappa_s(1)
-      zindterm(2) =  ztsold(1) + zeta_s(1)*(swradab_s(1) + zkappa_s(0)* &
-     &               zg1s*tsu)
+      ztrid(2,2)  =  rhosno * cp_ice * dzs(1) / dtice + zkappa_s(1) + zkappa_s(0)*zg1s
+      ztrid(2,3)  =  - zkappa_s(1)
+      zindterm(2) =  rhosno * cp_ice * dzs(1) / dtice * ztsold(1) + swradab_s(1) + zkappa_s(0)* zg1s * tsu
 
       ENDIF
       ELSE
@@ -420,11 +418,10 @@ hslim=0.0005d0
       zindterm(numeqmin)  =  dzf*tsu - zf
 
       ! first layer of ice equation
-      ztrid(numeqmin+1,1) =  - zkappa_i(0)*zg1*zeta_i(1)
-      ztrid(numeqmin+1,2) =  1.d0 + zeta_i(1)*(zkappa_i(1) + zkappa_i(0)* &
-     &                       zg1)  
-      ztrid(numeqmin+1,3) =  - zeta_i(1)*zkappa_i(1)  
-      zindterm(numeqmin+1)=  ztiold(1) + zeta_i(1)* swradab_i(1)
+      ztrid(numeqmin+1,1) =  - zkappa_i(0)*zg1
+      ztrid(numeqmin+1,2) =  rhoice * dzi(1) * zspeche_i(1) / dtice + zkappa_i(1) + zkappa_i(0) * zg1
+      ztrid(numeqmin+1,3) =  - zkappa_i(1)  
+      zindterm(numeqmin+1)=  rhoice * dzi(1) * zspeche_i(1) / dtice * ztiold(1) + swradab_i(1)
 
       ! case of only one layer in the ice (surface & ice equations are altered)
       if (nlice.eq.1) then
@@ -432,13 +429,11 @@ hslim=0.0005d0
       ztrid(numeqmin,2)    =  dzf - zkappa_i(0)*2.d0
       ztrid(numeqmin,3)    =  zkappa_i(0)*2.d0
 
-      ztrid(numeqmin+1,1)  =  -zkappa_i(0)*2.d0*zeta_i(1)
-      ztrid(numeqmin+1,2)  =  1.d0 + zeta_i(1)*(zkappa_i(0)*2.d0 + &
-     &                        zkappa_i(1))
+      ztrid(numeqmin+1,1)  =  -zkappa_i(0)*2.d0
+      ztrid(numeqmin+1,2)  =  rhoice * dzi(1) * zspeche_i(1) / dtice + zkappa_i(0)*2.d0 + zkappa_i(1)
       ztrid(numeqmin+1,3)  =  0.d0
 
-      zindterm(numeqmin+1) =  ztiold(1) + zeta_i(1)* &
-     &                      ( swradab_i(1) + zkappa_i(1)*tbo )
+      zindterm(numeqmin+1) =  rhoice * dzi(1) * zspeche_i(1) / dtice * ztiold(1) + swradab_i(1) + zkappa_i(1)*tbo
       endif
 
       else
@@ -453,22 +448,19 @@ hslim=0.0005d0
 
       ! first layer of ice equation
       ztrid(numeqmin,1) =  0.d0
-      ztrid(numeqmin,2) =  1.d0 + zeta_i(1)*(zkappa_i(1) + zkappa_i(0)* &
-     &                       zg1)  
-      ztrid(numeqmin,3) =  - zeta_i(1)* zkappa_i(1)
-      zindterm(numeqmin)  =  ztiold(1) + zeta_i(1)*(swradab_i(1) + &
-     &                       zkappa_i(0)*zg1*tsu )
+      ztrid(numeqmin,2) =  rhoice * dzi(1) * zspeche_i(1) / dtice + zkappa_i(1) + zkappa_i(0) * zg1
+      ztrid(numeqmin,3) =  - zkappa_i(1)
+      zindterm(numeqmin)  =  rhoice * dzi(1) * zspeche_i(1) / dtice * ztiold(1) + swradab_i(1) + zkappa_i(0)*zg1*tsu
 
       ! case of only one layer in the ice (surface & ice equations are altered)
       if (nlice.eq.1) then
          ztrid(numeqmin,1)  =  0.d0
-         ztrid(numeqmin,2)  =  1.d0 + zeta_i(1)*(zkappa_i(0)*2.d0 + &
-     &                         zkappa_i(1))
+         ztrid(numeqmin,2)  =  rhoice * dzi(1) * zspeche_i(1) / dtice + zkappa_i(0)*2.d0 + zkappa_i(1)
          ztrid(numeqmin,3)  =  0.d0
-         zindterm(numeqmin) =  ztiold(1) + zeta_i(1)*           &
+         zindterm(numeqmin) =  rhoice * dzi(1) * zspeche_i(1) / dtice * ztiold(1) + &
      &                         (swradab_i(1)                      &
      &                         + zkappa_i(1)*tbo)               &
-     &                         + tsu*zeta_i(1)*zkappa_i(0)*2.d0
+     &                         + tsu*zkappa_i(0)*2.d0
       endif
 
       endif
@@ -542,13 +534,18 @@ if (ti(layer) > ztmelt_i) write(*,*) 'internal melt in ice!',layer,nconv
 !write(*,*) 'diff ti/ts',tsu-tp0,ts(1:nlsno)-tp0,ti(1:nlice)-tp0
 
       ! zerrit is a residual which has to be under zerrmax
+      numeq=0
       zerrit   =  ABS(tsu-ztsutemp)            
       DO layer = 1, nlsno
+if (zerrit < ABS(ts(layer) - ztstemp(layer))) numeq=layer
          zerrit  =  MAX(zerrit,ABS(ts(layer) - ztstemp(layer)))
       END DO
       DO layer = 1, nlice
+if (zerrit < ABS(ti(layer) - ztitemp(layer))) numeq=layer + nlsno
          zerrit  =  max(zerrit,abs(ti(layer) - ztitemp(layer)))
       END DO
+! FD debug
+write(*,*) 'convergence',nconv,zerrit,numeq
 
 !
 !--------------------------------------------------------------------------
@@ -1603,8 +1600,8 @@ IF ( ln_write ) write(numout,*) 'final snow energy',zqt_s_ini - zqfont_su
       END DO
 
       zqt_ini = zqt_ini + zqt_i_ini ! includes zqsnic and zqsnow
-! FD debug
-! write(*,*) 'debug energy avant remap',-zqt_ini,-zqt_ini-sume1,dsume*dtice
+! FD debug 
+write(*,*) 'debug energy avant remap',zqt_ini,-zqt_ini-dsume*dtice
 
 !
 !------------------------------------------------------------------------------|
