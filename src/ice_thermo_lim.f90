@@ -284,11 +284,11 @@ write(*,*) zspeche_i(nlice)
 !------------------------------------------------------------------------------|
 !
       DO layer = 1, nlsno
-         zeta_s(layer) = rhosno*cp_ice*dzs(layer) /  dtice
+         zeta_s(layer) = rhosno * dzs(layer) * cp_ice / dtice
       END DO
 
       DO layer = 1, nlice
-        zeta_i(layer) = rhoice*dzi(layer) * zspeche_i(layer) / dtice
+         zeta_i(layer) = rhoice * dzi(layer) * zspeche_i(layer) / dtice
       END DO
 
       zf=zf0+dzf*(tsu-tsu0)
