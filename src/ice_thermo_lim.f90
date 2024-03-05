@@ -5,12 +5,12 @@ module ice_thermo_lim
 implicit none
 
 ! FD debug
-double precision sume1, sume2, dsume
+double precision sume1, sume2, dsume, sume3, sume4
 
       integer ipsnow, ipmelt
 
 ! restart
-double precision, dimension(maxlay) :: ti0, ts0, dzi0, dzs0
+double precision, dimension(maxlay) :: ti0, ts0, dzi0, dzs0, si0
 double precision hi0, hs0, tsu0
 
 contains
@@ -161,6 +161,7 @@ hslim=0.0005d0
       tsu0=tsu
       hi0=hi
       hs0=hs
+      si0(1:nlice)=si(1:nlice)
       dzi0(1:nlice) = dzi(1:nlice)
       dzs0(1:nlsno) = dzs(1:nlsno)
 
@@ -284,6 +285,8 @@ hslim=0.0005d0
      &              -(zrchu1+zrchu2*zssdqw)
       ! surface atmospheric net flux
           zf     =  fac_transmi * swrad + netlw + fsens + flat
+! FD debug
+write(*,*) 'atmo flux during nonlinear conv',zf
 
 !
 !------------------------------------------------------------------------------|
@@ -595,6 +598,32 @@ hslim=0.0005d0
       fsens   =  -fsens
       flat   =  MIN( -flat , 0.d0 ) ! always negative, as precip 
                                            ! energy already added
+! FD debug compute energy
+      sume3 = 0.d0
+      DO layer = 1, nlice
+         tmelts = -fracsal*si(layer)
+         sume3 = sume3 + rhoice * func_El(tmelts,ti(layer) - tp0) * dzi(layer)
+      END DO
+      DO layer = 1, nlsno
+         tmelts = 0.d0
+         sume3 = sume3 + rhosno * func_El(tmelts,ts(layer) - tp0) * dzs(layer) * ipsnow
+      END DO
+! FD debug energy
+      dsume = fcsu-fcbo
+      do layer=1,nlice
+        dsume = dsume + swradab_i(layer)
+      enddo
+      do layer=1,nlsno
+        dsume = dsume + swradab_s(layer) * ipsnow ! FD
+      enddo
+write(*,*) 'debug energy after diff',sume3,sume3-sume1,dtice*dsume
+
+      do layer=1,nlice
+        dsume = dsume + swradab_i(layer)
+      enddo
+      do layer=1,nlsno
+        dsume = dsume + swradab_s(layer) * ipsnow ! FD
+      enddo
 ! FD debug energy
       dsume = netlw + flat + fsens + fac_transmi * swrad + oceflx
       do layer=1,nlice
@@ -743,7 +772,8 @@ hslim=0.0005d0
 !
       z_f_surf  = netlw + flat + fsens - fcsu + fac_transmi * swrad
       z_f_surf  = MAX(0.d0, z_f_surf)
-     if (tsu < tmelt ) z_f_surf  = 0.d0
+! FD      z_f_surf  = z_f_surf * MAX(0.d0, SIGN(1.d0,tsu-tmelt))
+      if (tsu < tmelt ) z_f_surf  = 0.d0
 
       IF ( ln_write ) THEN
          WRITE(numout,*) ' Available heat for surface ablation ... '
@@ -791,7 +821,7 @@ hslim=0.0005d0
       dh_s_melt    =  0.d0
       zqprec       =  rhosno * ( cp_ice * ( tp0 - tair ) + mlfus )
 ! FD check for tair < tp0
-      if (tair > tp0 ) then
+      if (tair > tp0 .and. z_f_surf == 0.d0 ) then
           snowfall = 0.d0
          dh_s_prec = 0.d0
       endif
@@ -817,10 +847,11 @@ hslim=0.0005d0
       IF ( ln_write ) WRITE(numout,*) ' snow melts! '
       IF ( ln_write ) WRITE(numout,*) ' zqfont_su : ', zqfont_su / dtice 
 
-      zdeltah(1)       =  MIN( 0.d0 , - zqfont_su / MAX( zqprec , zeps ) )
-      zqfont_su        =  MAX( 0.d0 , - dh_s_prec  * ipsnow - zdeltah(1) ) * zqprec ! FD
-      zdeltah(1)       =  MAX( - dh_s_prec, zdeltah(1) )
-      dh_s_melt        =  dh_s_melt + zdeltah(1) * ipsnow ! FD
+! FD not sure that you can treat snow this way
+! FD      zdeltah(1)       =  MIN( 0.d0 , - zqfont_su / MAX( zqprec , zeps ) )
+! FD      zqfont_su        =  MAX( 0.d0 , - dh_s_prec  * ipsnow - zdeltah(1) ) * zqprec ! FD
+! FD      zdeltah(1)       =  MAX( - dh_s_prec, zdeltah(1) )
+! FD      dh_s_melt        =  dh_s_melt + zdeltah(1) * ipsnow ! FD
 
       ! Melt of snow
       DO layer = 1, nlsno !in case of melting of more than 1 layer
@@ -863,7 +894,7 @@ hslim=0.0005d0
 ! FD      WRITE(numout,*) ' z_f_surf  : ', - z_f_surf
 ! FD      IF ( zqt_s_fin.GT.0.0 ) THEN
 ! FD         cons_err = ABS(zdqt_s / dtice  + z_f_surf )
-! FD      ELSE
+! FD      ELSE! FD
 ! FD         cons_err = ABS(zqt_s_ini / dtice + zdqt_s / dtice )
 ! FD      ENDIF
 ! FD      WRITE(numout,*) ' Cons error, snow : ', cons_err
@@ -1226,8 +1257,8 @@ hslim=0.0005d0
 !------------------------------------------------------------------------------|
 !
       ! snow surface behaviour : calcul de snind-snswi
-      ! snind : index tel que sa valeur est 0 si la neige s'accrÃ¨te
-      !                1 si la 1ere couche est entamÃ©e par la fonte
+      ! snind : index tel que sa valeur est 0 si la neige s'accrète
+      !                1 si la 1ere couche est entamée par la fonte
       !                2 si la 2eme ....
       !                                  etc ...
       snind    =  0  
@@ -1569,6 +1600,7 @@ hslim=0.0005d0
       END DO
 
       zqt_ini = zqt_ini + zqt_i_ini ! includes zqsnic and zqsnow
+write(*,*) 'debug energy avant remap',-zqt_ini,-zqt_ini-sume1,dsume*dtice
 
 !
 !------------------------------------------------------------------------------|
@@ -1738,21 +1770,21 @@ hslim=0.0005d0
          sume2 = sume2 + rhosno * func_El(tmelts,ts(layer) - tp0) * dzs(layer) * ipsnow ! FD
       END DO
 ! FD debug energy
-      write(*,*) 'debug energy',dsume * dtice, sume2 - sume1, sume1
-!      if ( abs(dsume*dtice-sume2+sume1) .gt. 1d4 .or. ts(1) .gt. tp0 ) then
-!          call flush(numout)
-!          call flush(6)
-!       OPEN(1,file='restart.dat')
-!       WRITE(1,*) nlice,nlsno
-!       WRITE(1,*) ti0(1:nlice),ts0(1:nlsno),tsu0,tbo
-!       WRITE(1,*) si(1:nlice)
-!       WRITE(1,*) hi0,hs0
-!       WRITE(1,*) dzi0(1:nlice),dzs0(1:nlsno)
-!       WRITE(1,*) snowfall,dwnlw,tsu0,tair,qair,uair,swrad,oceflx
-!       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
-!       CLOSE(1)
-!          stop 'energy cons pb'
-!      endif
+      write(*,*) 'debug energy',dsume * dtice, sume2 - sume1, sume2
+      if ( abs(dsume*dtice-sume2+sume1) .gt. 1d4 .or. ts(1) .gt. tp0 ) then
+          call flush(numout)
+          call flush(6)
+       OPEN(1,file='restart.dat')
+       WRITE(1,*) nlice,nlsno,ith_cond
+       WRITE(1,*) ti0(1:nlice),ts0(1:nlsno),tsu0,tbo
+       WRITE(1,*) si0(1:nlice),seasal
+       WRITE(1,*) hi0,hs0
+       WRITE(1,*) dzi0(1:nlice),dzs0(1:nlsno)
+       WRITE(1,*) snowfall,dwnlw,tsu0,tair,qair,uair,swrad,oceflx,pres
+       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
+       CLOSE(1)
+          stop 'energy cons pb'
+      endif
 
 !-------------------------------------------------------------------------------
 ! Fin de la routine ice_th_remap
