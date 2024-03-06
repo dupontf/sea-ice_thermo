@@ -469,7 +469,7 @@ subroutine ice_thermo(dtice)
     enddo
     em_thin_snow = sume2 / rhosno / hsold
 
-    if ( Fnet > 0.d0 .and. temp(ns,0)+tiny.ge.tf(ns) ) then ! use Fnet if positive
+    if ( Fnet > 0.d0 .and. temp(ni,0)+tiny.gt.tf(ni) ) then ! use Fnet if positive
 
       energy_snow_melt = min( - sume2, Fnet * dtice )! energy (negative) required to melt the thin snow (in entirity if Fnet large enough)
       dhs =  - energy_snow_melt / sume2 * hs_b(0) ! melted snow thickness
@@ -533,7 +533,7 @@ subroutine ice_thermo(dtice)
 
       if ( .not.thin_snow_active ) then
           Fnet = Fnet0 - dzf * (temp(ns,1)-tiold(ns))
-          Fprec = snow_precip * rhosno * em(ns)
+          Fprec = -snow_precip*rhosno*qm(ns)
       else ! FD no snow
           Fnet = Fnet0 - dzf * (temp(ni,1)-tiold(ni))
           Fprec = snow_precip * rhosno * em_thin_snow
@@ -574,8 +574,7 @@ endif
 
          IF (temp(ns,1)+tiny .GE. Tf(ns) .AND. -Fnet-Fcss .LT. 0d0) THEN
 ! FD the code cannot deal with concomittent snow accumulation and melt
-!            dssdt = MIN((-Fnet-Fcss)/rhosno/qm(ns),0d0)
-            dssdt = MIN((-Fnet-Fcss)/rhosno/qm(ns-1),0d0)
+            dssdt = MIN((-Fnet-Fcss)/rhosno/qm(ns),0d0)
             snow_precip = 0.d0
          ENDIF
       else
@@ -590,12 +589,9 @@ endif
          ENDIF
       endif
 
-      IF (oceflx-Fcib .LT. 0d0) THEN		! for ice growth: new-ice salin.
+! bottom growth or melt
          qm(0) = func_qm(Tf(0),temp(0,1))
          energy_bot = qm(0)
-      ELSEIF (oceflx-Fcib .GT. 0d0) THEN	! qm_mean_first_layer for melt
-         energy_bot = qm(1)
-      ENDIF
 ! FD generalized bottom
          dibdt	= (oceflx-Fcib) / rhoice / energy_bot
 
@@ -618,10 +614,10 @@ endif
       fwf = fwf + hs_b(0) / dtice / rhowat * rhosno
       Tsbc = .false.
       thin_snow_active = .true.
-      tsu = temp(ni,1) + temp0
+      tsu = ti(ni) + temp0
       snow_precip = 0.d0
       hs_b(1) = 0.d0
-      dspdt = -hs_b(0) /dtice
+      dspdt = -hs_b(0) / dtice
       dssdt = dspdt
       Fnet0 = Fnet0 - fthin_snow
       Fnet = Fnet - fthin_snow
@@ -705,22 +701,25 @@ endif
          DT0(j) =  C3i*R(j)+rhoice*cp(j)*tiold(j)*henew(j) &
                           - rhoice*em(j)*(henew(j)-heold(j))  ! metric term to close the energy conservation
 
-         IF (w(j) .GT. 0d0) THEN
+         if (j==1) then
             AT1(j) = AT1(j) - C2i*w(j  ) * cp(j-1)
             DT0(j) = DT0(j) + C2i*w(j  ) *(em(j-1)-cp(j-1)*tiold(j-1))
-         ELSE
-            BT1(j) = BT1(j) - C2i*w(j  ) * cp(j  )
-            DT0(j) = DT0(j) + C2i*w(j  ) *(em(j  )-cp(j  )*tiold(j  ))
-         ENDIF
-         IF (w(j+1) .GT. 0d0) THEN
+         else
+            AT1(j) = AT1(j) - C2i*w(j  ) * cp(j-1) * 0.5d0
+            DT0(j) = DT0(j) + C2i*w(j  ) *(em(j-1)-cp(j-1)*tiold(j-1)) * 0.5d0
+            BT1(j) = BT1(j) - C2i*w(j  ) * cp(j  ) * 0.5d0
+            DT0(j) = DT0(j) + C2i*w(j  ) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+         endif
+
+         if (j==ni-1) then
             BT1(j) = BT1(j) + C2i*w(j+1) * cp(j  )
             DT0(j) = DT0(j) - C2i*w(j+1) *(em(j  )-cp(j  )*tiold(j  ))
-         ELSE
-            CT1(j) = CT1(j) + C2i*w(j+1) * cp(j+1)
-            DT0(j) = DT0(j) - C2i*w(j+1) *(em(j+1)-cp(j+1)*tiold(j+1))
-         ENDIF
-
-
+         else
+            BT1(j) = BT1(j) + C2i*w(j+1) * cp(j  ) * 0.5d0
+            DT0(j) = DT0(j) - C2i*w(j+1) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+            CT1(j) = CT1(j) + C2i*w(j+1) * cp(j+1) * 0.5d0
+            DT0(j) = DT0(j) - C2i*w(j+1) *(em(j+1)-cp(j+1)*tiold(j+1)) * 0.5d0
+         endif
       ENDDO
 
      if ( .not.thin_snow_active ) then
@@ -741,21 +740,23 @@ endif
             DT0(j) =  C3s*R(j)+rhosno*cp(j)*tiold(j)*henew(j) &
                              - rhosno*em(j)*(henew(j)-heold(j))
 
+        if (j.ne.ni+1) then
+! FD actually the ice-snow interface velocity is always zero
+            AT1(j) = AT1(j) - C2s*w(j-1) * cp(j-1) * 0.5d0
+            DT0(j) = DT0(j) + C2s*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1)) * 0.5d0
+            BT1(j) = BT1(j) - C2s*w(j-1) * cp(j  ) * 0.5d0
+            DT0(j) = DT0(j) + C2s*w(j-1) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+        endif
 
-         IF (w(j-1) .GT. 0d0) THEN
-            AT1(j) = AT1(j) - C2s*w(j-1) * cp(j-1)
-            DT0(j) = DT0(j) + C2s*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1))
-         ELSE
-            BT1(j) = BT1(j) - C2s*w(j-1) * cp(j  )
-            DT0(j) = DT0(j) + C2s*w(j-1) *(em(j  )-cp(j  )*tiold(j  ))
-         ENDIF
-         IF (w(j) .GT. 0d0) THEN
-            BT1(j) = BT1(j) + C2s*w(j  ) * cp(j  )
-            DT0(j) = DT0(j) - C2s*w(j  ) *(em(j  )-cp(j  )*tiold(j  ))
-         ELSE
+        if (j==ns-1) then
             CT1(j) = CT1(j) + C2s*w(j  ) * cp(j+1)
             DT0(j) = DT0(j) - C2s*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1))
-         ENDIF
+        else
+            BT1(j) = BT1(j) + C2s*w(j  ) * cp(j  ) * 0.5d0
+            DT0(j) = DT0(j) - C2s*w(j  ) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+            CT1(j) = CT1(j) + C2s*w(j  ) * cp(j+1) * 0.5d0
+            DT0(j) = DT0(j) - C2s*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1)) * 0.5d0
+        endif
       ENDDO
 
        k1 = kks(ns-1)
@@ -811,6 +812,10 @@ endif
       DO j=ni+1,ns
          temp(j,1) = tout(j)
       ENDDO
+!     else
+!      DO j=ni+1,ns
+!         temp(j,1) = temp(ni,1)
+!      ENDDO
      endif
 
          DO j=0,ns
@@ -965,7 +970,6 @@ if (debug) then
  write(*,*) 'hice',hi_b,-w(ni),w(1)
  write(*,'(I6,300(1x,e9.3))') counter, w(1:ns-1)
  write(*,'(I6,300(f8.3,1x))') counter, temp(0:ns,1)
- write(*,*) 'tsu',tsu-temp0
 endif
 ! FD debug if energy not conserved
       IF ( abs(Einp-dEin) > 1e-3 .or. isnan(hs_b(1)) ) THEN
@@ -1039,6 +1043,10 @@ endif
       else
        tsu=temp(ni,1) + temp0
       endif
+! FD debug
+if (debug) then
+ write(*,*) 'tsu',tsu-temp0,temp(ns,1)
+endif
 
 ! call back for LIM3 of thickness (needed for radiative transfer)
       do j=1,nlice
