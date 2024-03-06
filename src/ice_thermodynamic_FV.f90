@@ -496,8 +496,8 @@ endif
     thin_snow_active=.true.
     tiold(ni+1:ns) = tiold(ns+1)
     em_thin_snow = func_el(Tf(ns+1),tiold(ns+1))
-    Tf(ni+1:ns+1) = Tf(ni)
-    sali(ni+1:ns+1,0) = sali(ni,0)
+    Tf(ni+1:ns) = Tf(ns+1)
+!    sali(ni+1:ns+1,0) = sali(ni,0)
 
   endif ! end thin snow
 !---------------------------------------------------------------------
@@ -570,7 +570,7 @@ endif
 
          IF (temp(ns+1,1)+tiny .GE. Tf(ns+1) .AND. -Fnet-Fcis .LT. 0d0) THEN
             Tsbc = .true.
-            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ni),0d0)
+            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ns+1),0d0)
          ENDIF
       endif
 
@@ -607,17 +607,17 @@ if (extra_debug) write(*,*) 'switch to thin_snow_active',hs_b(1),fthin_snow
       Fnet0 = Fnet0 - fthin_snow
       Fnet = Fnet - fthin_snow
       kki(ni) = ki(ni) / (hi_b(0) * dzzi(ni))
-      Tf(ni+1:ns+1) = Tf(ni)
-      sali(ni+1:ns+1,0) = sali(ni,0)
-      temp(ni+1:ns+1,1) = Tf(ni)
-      qm(ni+1:ns+1)   = func_qm(Tf(ni+1),temp(ni+1,1))
-      em(ni+1:ns+1)   = func_el(Tf(ni+1),temp(ni+1,1))
+!      Tf(ni+1:ns+1) = Tf(ni)
+!      sali(ni+1:ns+1,0) = sali(ni,0)
+!      temp(ni+1:ns+1,1) = Tf(ni)
+!      qm(ni+1:ns+1)   = func_qm(Tf(ni+1),temp(ni+1,1))
+!      em(ni+1:ns+1)   = func_el(Tf(ni+1),temp(ni+1,1))
       ! update ice surface
-
+      temp(ns+1,1) = Tf(ns+1)
       Fcis = -kki(ni) * ( temp(ns+1,1) - temp(ni  ,1))
          IF (temp(ns+1,1)+tiny .GE. Tf(ns+1) .AND. -Fnet-Fcis .LT. 0d0) THEN
             Tsbc = .true.
-            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ni),0d0)
+            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ns+1),0d0)
          ENDIF
       dhidt	= disdt - dibdt ! original
 
@@ -694,8 +694,6 @@ if (extra_debug) write(*,*) 'switch to thin_snow_active',hs_b(1),fthin_snow
          if ( Tsbc .and. thin_snow_active ) &
          matj(ni+1,j) = - rhoice * em(j) * dzi(j)
       ENDDO
-! FD debug
-write(*,*) 'mass',ni,dt0(ni)
 
      if ( .not.thin_snow_active ) then
 
@@ -737,12 +735,9 @@ write(*,*) 'mass',ni,dt0(ni)
        DT0(j)      =   Fnet + Fcis
 
       IF (Tsbc) THEN
-         DT0(j)      = - w(ni) * rhoice * qm(ni) + Fnet + Fcis ! line 0 is for w(0)
-         matj(j  ,j) = rhoice * qm(ni)                         ! w increment
+         DT0(j)      = - w(ni) * rhoice * qm(ns+1) + Fnet + Fcis ! line 0 is for w(0)
+         matj(j  ,j) = rhoice * qm(ns+1)                         ! w increment
          matj(j-1,j) = - k0                                    ! dFcis/dT increment
-!         matj(j-1,j) = - k0 + w(ni) * rhoice * cp(j-1)         ! dFcis/dT increment + variation due to top cell temp variation
-! FD debug
-write(*,*) 'em top',em(ni),qm(ni),cp(ni),cp(j-1)
       ENDIF
      endif ! condition on hs_b
 
@@ -775,8 +770,6 @@ write(*,*) 'em top',em(ni),qm(ni),cp(ni),cp(j-1)
             matj(j  ,j) = matj(j  ,j) - rhoice * w(j-1) * cp(j  ) * 0.5d0
             DT0(j)      = DT0(j)      + rhoice * w(j-1) * em(j  ) * 0.5d0
           enddo
-! FD debug
-write(*,*) 'adv down',ni,dt0(ni)
          endif
 
 ! metric terms, newton terms for change in thickness
@@ -831,9 +824,7 @@ write(*,*) 'adv down',ni,dt0(ni)
 ! surface treatment assuming melting, looks like an upwind formulation (em=cp_ice*Tf at surface)
 ! if no melting w=0 anyway
          j=ni
-            DT0(j)      = DT0(j)      - rhoice * w(j  ) * em(j)
-! FD debug
-write(*,*) 'adv up',j,dt0(j),w(j)
+            DT0(j)      = DT0(j)      - rhoice * w(j  ) * em(ns+1)
 
 ! metric terms, newton terms for change in thickness
          if (adv_upwind) then
@@ -860,7 +851,7 @@ write(*,*) 'adv up',j,dt0(j),w(j)
          endif
          j=ni ! upper transport in ice+snow is zero, therefore it only remains case of thin_snow and top melt
            if ( Tsbc .and. thin_snow_active ) then
-            matj(ni+1,j) = matj(ni+1,j) + rhoice * em(j) *      zi(j  )
+            matj(ni+1,j) = matj(ni+1,j) + rhoice * em(ns+1) *      zi(j  )
            endif
 
 
@@ -970,7 +961,7 @@ write(*,*) 'adv up',j,dt0(j),w(j)
 if (extra_debug) write(*,*) 'res',j,dt0(j)
       enddo
       if (debug) write(*,*) 'residual',counter,residual
-! FD debug
+!! FD debug
 !write(*,*) 'mat'
 !do j=0,ntot-1
 ! write(*,'(6(e10.3,1x),3x,e10.3)') matj(0:ntot-1,j),dt0(j)
@@ -998,7 +989,7 @@ if (extra_debug) write(*,*) 'res',j,dt0(j)
 !      write(*,*) 'matrix factorization done'
       tout(0:ntot-1)=dt0(0:ntot-1)
       call DGBSL(matband,bandmax,ntot,ML,MU,IPVT,tout,0)
-! FD debug
+!! FD debug
 !write(*,*) 'solution'
 !do j=0,ntot-1
 ! write(*,'(e10.3)') tout(j)
@@ -1044,10 +1035,10 @@ if (extra_debug) write(*,*) 'res',j,dt0(j)
       if (Tsbc) then
 ! melting case
         w(ni) = w(ni) + tout(ni+1)
-        temp(ni+1,1) = Tf(ni+1)
+        temp(ns+1,1) = Tf(ns+1)
       else
 ! cold surface case, update temperature
-        temp(ni+1,1) = temp(ni+1,0) + tout(ni+1)
+        temp(ns+1,1) = temp(ns+1,0) + tout(ni+1)
       endif
      endif
 
@@ -1066,9 +1057,9 @@ endif
             ENDIF
          ENDDO
 
-! in any case, the temperature of snow is overwritten by that of ice
+! in any case, the temperature of snow is overwritten by that of top snow/ice
      if ( thin_snow_active ) then
-      temp(ni+2:ns+1,1) = temp(ni+1,1)
+      temp(ni+1:ns,1) = temp(ns+1,1)
      endif
 
 !------------------------------------------------------------------------
