@@ -238,16 +238,18 @@ subroutine ice_thermo(dtice)
 
   double precision,save :: latvap = 2.5d6          ! J/kg latent heat of vaporization
   double precision,save :: latsub = 2.834d6        ! J/kg latent heat of sublimation
+  logical :: adv_upwind=.false.
 ! FD debug
  debug=.true.
 ! extra_debug=.true.
+      hicut=1.d-2
 
 !------------------------------------------------------------------------
 !     condition on ice thickness
 !     no thermo below 5 cm
 !------------------------------------------------------------------------
 
-      if (hi.lt.5d-2) return
+!      if (hi.lt.hicut) return
 
 !------------------------------------------------------------------------
 !     Some logical constants
@@ -685,18 +687,38 @@ subroutine ice_thermo(dtice)
             AT1(j) = AT1(j) - C2i*w(j-1) * cp(j-1)
             DT0(j) = DT0(j) + C2i*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1))
          else
+if (.not.adv_upwind) then
             AT1(j) = AT1(j) - C2i*w(j-1) * cp(j-1) * 0.5d0
             DT0(j) = DT0(j) + C2i*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1)) * 0.5d0
             BT1(j) = BT1(j) - C2i*w(j-1) * cp(j  ) * 0.5d0
             DT0(j) = DT0(j) + C2i*w(j-1) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+else
+  if (w(j-1)>0.d0) then
+            AT1(j) = AT1(j) - C2i*w(j-1) * cp(j-1)
+            DT0(j) = DT0(j) + C2i*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1))
+  else
+            BT1(j) = BT1(j) - C2i*w(j-1) * cp(j  )
+            DT0(j) = DT0(j) + C2i*w(j-1) *(em(j  )-cp(j  )*tiold(j  ))
+  endif
+endif
          endif
 
 ! upper transport
          if (j<ni) then
+if (.not.adv_upwind) then
             BT1(j) = BT1(j) + C2i*w(j  ) * cp(j  ) * 0.5d0
             DT0(j) = DT0(j) - C2i*w(j  ) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
             CT1(j) = CT1(j) + C2i*w(j  ) * cp(j+1) * 0.5d0
             DT0(j) = DT0(j) - C2i*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1)) * 0.5d0
+else
+  if (w(j  )>0.d0) then
+            BT1(j) = BT1(j) + C2i*w(j  ) * cp(j  )
+            DT0(j) = DT0(j) - C2i*w(j  ) *(em(j  )-cp(j  )*tiold(j  ))
+  else
+            CT1(j) = CT1(j) + C2i*w(j  ) * cp(j+1)
+            DT0(j) = DT0(j) - C2i*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1))
+  endif
+endif
          else ! no choice but to use an upwind formulation during ice surface melt (em=0 at surface)
             BT1(j) = BT1(j) + C2i*w(j  ) * cp(j  )
             DT0(j) = DT0(j) - C2i*w(j  ) *(em(j  )-cp(j  )*tiold(j  ))
@@ -716,20 +738,39 @@ subroutine ice_thermo(dtice)
             DT0(j) =  (C3s*R(j)+rhosno*cp(j)*tiold(j)*henew(j) &
                              - rhosno*em(j)*(henew(j)-heold(j)))/dtice
 
-! FD actually the ice-snow interface velocity is always zero
+if (.not.adv_upwind) then
+! FD actually the ice-snow interface velocity is always zero (no special treatment for j=ni+1)
             AT1(j) = AT1(j) - C2s*w(j-1) * cp(j-1) * 0.5d0
             DT0(j) = DT0(j) + C2s*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1)) * 0.5d0
             BT1(j) = BT1(j) - C2s*w(j-1) * cp(j  ) * 0.5d0
             DT0(j) = DT0(j) + C2s*w(j-1) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
-
+else
+  if (w(j-1)>0.d0) then
+            AT1(j) = AT1(j) - C2s*w(j-1) * cp(j-1)
+            DT0(j) = DT0(j) + C2s*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1))
+  else
+            BT1(j) = BT1(j) - C2s*w(j-1) * cp(j  )
+            DT0(j) = DT0(j) + C2s*w(j-1) *(em(j  )-cp(j  )*tiold(j  ))
+  endif
+endif
         if (j==ns) then
             CT1(j) = CT1(j) + C2s*w(j  ) * cp(j+1)
             DT0(j) = DT0(j) - C2s*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1))
         else
+if (.not.adv_upwind) then
             BT1(j) = BT1(j) + C2s*w(j  ) * cp(j  ) * 0.5d0
             DT0(j) = DT0(j) - C2s*w(j  ) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
             CT1(j) = CT1(j) + C2s*w(j  ) * cp(j+1) * 0.5d0
             DT0(j) = DT0(j) - C2s*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1)) * 0.5d0
+else
+  if (w(j  )>0.d0) then
+            BT1(j) = BT1(j) + C2s*w(j  ) * cp(j  )
+            DT0(j) = DT0(j) - C2s*w(j  ) *(em(j  )-cp(j  )*tiold(j  ))
+  else
+            CT1(j) = CT1(j) + C2s*w(j  ) * cp(j+1)
+            DT0(j) = DT0(j) - C2s*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1))
+  endif
+endif
         endif
       ENDDO
 
@@ -787,6 +828,12 @@ subroutine ice_thermo(dtice)
      else
          temp(ns+1,1) = tout(ni+1)
      endif
+
+     IF (counter.gt.11) THEN
+         DO j=0,ns+1
+            temp(j,1) = 0.5d0 * ( temp(j,0) + temp(j,1) )
+         ENDDO
+     ENDIF
 
          DO j=0,ns+1
             IF (temp(j,1) .GT. Tf(j)) THEN
@@ -974,6 +1021,13 @@ endif
       ENDDO
      endif
 
+      IF (hi_b(1) .LT. hicut) THEN
+         hi_b(1) = hicut
+         DO j=0,ni
+            temp(j,1) = tocn
+         ENDDO
+      ENDIF
+      
       hs_b(0) = hs_b(1)
       hi_b(0) = hi_b(1)
       
@@ -981,13 +1035,6 @@ endif
          sali(j,0) = sali(j,1)
          temp(j,0) = temp(j,1)
       ENDDO
-      
-      IF (hi_b(0) .LT. hicut) THEN
-         hi_b(0) = hicut
-         DO j=0,ni
-            temp(j,0) = tocn
-         ENDDO
-      ENDIF
       
 
 ! FD prepare for callback
