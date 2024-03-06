@@ -136,8 +136,6 @@ subroutine ice_thermo(dtice)
 
       DOUBLE PRECISION :: &
         Fbase,&! heat flux at ice base			[W/m2]
-        Fsen ,&! sensible heat flux			[W/m2]
-        Flat ,&! latent heat flux			[W/m2]
         S    ,&! initial salinity profile		[psu]
         T    ,&! initial temp. profile			[C]
         zini(0:maxlay),&! z-values of init interpol tprof 	[m]
@@ -241,6 +239,7 @@ subroutine ice_thermo(dtice)
   logical :: adv_upwind=.false.
 ! FD debug
  debug=.true.
+! adv_upwind = .true.
 ! extra_debug=.true.
       hicut=1.d-2
 
@@ -590,6 +589,7 @@ subroutine ice_thermo(dtice)
       Tsbc = .false.
       thin_snow_active = .true.
       snow_precip = 0.d0
+      em_thin_snow = 0.d0
       hs_b(1) = 0.d0
       dspdt = -hs_b(0) / dtice
       dssdt = dspdt
@@ -604,12 +604,6 @@ subroutine ice_thermo(dtice)
 
       henew(   1:ni  )=dzi(   1:ni  )*hi_b(1)
       henew(ni+1:ns  )=dzi(ni+1:ns  )*hs_b(1)
-
-! FD only relevant when salinity varies during the integration
-! FD case of solving for varying salinity
-      DO j=0,ns
-         Tf(j)   = Tfreeze1(sali(j,1))
-      ENDDO
 
 !-----------------------------------------------------------------------
 !     Vertical velocities (grid advection)
@@ -640,14 +634,14 @@ subroutine ice_thermo(dtice)
 
       if ( .not.thin_snow_active ) then
         DO j=ns,ni+1,-1
-          R(j)   = swradab_s(ns-j)
+          R(j)   = swradab_s(ns-j+1)
         ENDDO
       else
          R(ni+1:ns)=0.d0
       endif
       R(ni)=0.d0
       DO j=ni,1,-1
-         R(j)   = swradab_i(ni-j)
+         R(j)   = swradab_i(ni-j+1)
       ENDDO
       R(0)=0.d0
 
@@ -835,11 +829,26 @@ endif
          ENDDO
      ENDIF
 
-         DO j=0,ns+1
+         DO j=0,ni
             IF (temp(j,1) .GT. Tf(j)) THEN
                temp(j,1) = Tf(j)
+                kki(j-1)=kki(j-1)*10.d0
+                kki(j  )=kki(j )*0.1d0
+! FD debug
+write(*,*) 'ice temp pb',j,counter
+           ENDIF
+         ENDDO
+         temp(ni+1,1)=MIN(temp(ni+1,1),Tf(ni+1))
+         DO j=ni+2,ns
+            IF (temp(j,1) .GT. Tf(j)) THEN
+               temp(j,1) = Tf(j)
+               kks(j-1)=kks(j-1)*10.d0
+               kks(j  )=kks(j  )*0.1d0
+! FD debug
+write(*,*) 'snow temp pb',j,counter
             ENDIF
          ENDDO
+         temp(ns+1,1)=MIN(temp(ns+1,1),Tf(ns+1))
 
 !------------------------------------------------------------------------
 !     Update conductive heat fluxes
@@ -855,12 +864,7 @@ endif
       
       Fcis = -kki(ni) * ( temp(ns+1,1) - temp(ni  ,1))  ! only valid for no-snow case
       Fcib = -kki(0 ) * ( temp(   1,1) - temp(   0,1))
-
-     if ( .not.thin_snow_active ) then
-         Fnet = Fnet0 - dzf * (temp(ns+1,1)-tiold(ns+1))
-     else ! FD no snow
-         Fnet = Fnet0 - dzf * (temp(ns+1,1)-tiold(ns+1))
-     endif
+      Fnet = Fnet0 - dzf * (temp(ns+1,1)-tiold(ns+1))
 
 ! FD debug
 if (extra_debug) then
