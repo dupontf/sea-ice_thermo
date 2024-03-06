@@ -792,15 +792,25 @@ if (extra_debug) write(*,*) 'switch to thin_snow_active',hs_b(1),fthin_snow,Fnet
       R(0)=0.0_8
 
 !-----------------------------------------------------------------------
+!     fix bottom liquid fraction in some way
+!-----------------------------------------------------------------------
+
+      j=0
+        phib(j,1) = liquifrac_bot ! fixed liquidus fraction at bottom if ingoing
+        sibr(j,1) = func_liqu_sa(temp(j,1))
+        sali(j,1) = phib(j,1) * sibr(j,1)
+
+
+!-----------------------------------------------------------------------
 !     matrix coefficients [matj] {x} = {D}
 !-----------------------------------------------------------------------
 
        if ( thin_snow_active ) then
-          ntot=2*ni+3
+          ntot=2*ni+2
           Fcsu = Fcis
           ns = ni ! for simplification, ns becomes the total number of active ice(+snow) layers
        else
-          ntot=ni+ns+3
+          ntot=ni+ns+2
           Fcsu = Fcss
        endif
 ! FD debug
@@ -825,7 +835,7 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
          matj(j  ,j) =  k0 + k1 + rho(j) * cp(j) * henew(j) / dtice
          matj(j+1,j) = -k1
 ! liquid fraction term
-         jm=j+ns+2
+         jm=j+ns+1
          matj(jm ,j) =          rho(j) * dedp(j) * henew(j) / dtice
       ENDDO
 
@@ -842,7 +852,7 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
          matj(0   ,j) =   rho(j) * em(j) * dzi(j)
       ENDDO
       if ( ni==ns .and. Tsbc ) then
-       DO j=1,ns
+       DO j=1,ni
          matj(ns+1,j) = - rho(j) * em(j) * dzi(j)
        ENDDO
       endif
@@ -872,25 +882,20 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
 ! lower transport in ice
 !-----------------------------------------------------------------------
 
-! at bottom, treat as centered but temperature is at same position as w(0) (z=0) so looks like upwind
-         j=1
-            DT0(j)      = DT0(j)      + rho(j-1) * w(j-1) * em(j-1)
-! metric terms, newton terms for change in thickness d(rho w E)/d(w0)
-         j=1
-            matj(0  ,j) = matj(0  ,j) - rho(j-1) * em(j-1) * os(1,j)
+          do j=1,ns
+            DT0(j)      = DT0(j)      + rho(j-1) * w(j-1) * em(j-1) * wsg(j-1)
+            DT0(j)      = DT0(j)      + rho(j  ) * w(j-1) * em(j  ) * wog(j-1)
+          enddo
 
 ! starts at j=2 (not j=1) because we know temperature is not the unknown at j-1=0 and so requires some special treatments
           do j=2,ns
             matj(j-1,j) = matj(j-1,j) - rho(j-1) * w(j-1) * cp(j-1) * wsg(j-1)
-            DT0(j)      = DT0(j)      + rho(j-1) * w(j-1) * em(j-1) * wsg(j-1)
             matj(j  ,j) = matj(j  ,j) - rho(j  ) * w(j-1) * cp(j  ) * wog(j-1)
-            DT0(j)      = DT0(j)      + rho(j  ) * w(j-1) * em(j  ) * wog(j-1)
           enddo
 
-! metric terms, newton terms for change in thickness
-
+! metric terms, newton terms for change in thickness d(rho w E)/d(w0)
 ! bottom velocity
-           do j=2,ni
+           do j=1,ni
             matj(0   ,j) = matj(0   ,j) - rho(j-1) * em(j-1) * os(1,j) * wsg(j-1)
             matj(0   ,j) = matj(0   ,j) - rho(j  ) * em(j  ) * os(1,j) * wog(j-1)
            enddo
@@ -909,9 +914,12 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
           endif
 
 ! liquid fraction terms
-          do j=1,ni
-            jm=j+ns+2
+          do j=2,ni
+            jm=j+ns+1
             matj(jm-1,j) = matj(jm-1,j) - rho(j-1) * w(j-1) * dedp(j-1) * wsg(j-1)
+          enddo
+          do j=1,ni
+            jm=j+ns+1
             matj(jm  ,j) = matj(jm  ,j) - rho(j  ) * w(j-1) * dedp(j  ) * wog(j-1)
           enddo
    
@@ -932,7 +940,7 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
             matj(j+1,j) = matj(j+1,j) + rho(j+1) * w(j  ) * cp(j+1) * wog(j)
 
 ! metric terms, newton terms for change in thickness
-          do j=1,ns-1
+          do j=1,ni-1
             matj(0   ,j) = matj(0   ,j) + rho(j  ) * em(j  ) * os(2,j) * wsg(j)
             matj(0   ,j) = matj(0   ,j) + rho(j+1) * em(j+1) * os(2,j) * wog(j)
           enddo
@@ -950,11 +958,11 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
 
 ! liquid fraction terms
           do j=1,ni
-            jm=j+ns+2
+            jm=j+ns+1
             matj(jm  ,j) = matj(jm  ,j) + rho(j  ) * w(j  ) * dedp(j  ) * wsg(j)
           enddo
           do j=1,ni-1
-            jm=j+ns+2
+            jm=j+ns+1
             matj(jm+1,j) = matj(jm+1,j) + rho(j+1) * w(j  ) * dedp(j+1) * wog(j)
           enddo
 !          j=ns ! covers case of snow fall (w<0)
@@ -1020,76 +1028,95 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
 ! add terms for salinity
 !-----------------------------------------------------------------------
 
-        j=0 ! bottom mixing ratio is fixed at external value or no-gradient BC
-        jm=ns+1+j+1
-        if (w(0) > 0.0_8) then ! ice growth
-           dt0(jm)     = liquifrac_bot - phib(j,1) ! fixed liquidus fraction at bottom
-           matj(jm,jm) = 1.0_8 ! diagonal term
-        else
-           dt0(jm)       = 0.0_8 ! when melting, use a no-gradient condition
-           matj(jm  ,jm) =  1.0_8 ! diagonal term
-           matj(jm+1,jm) = -1.0_8 ! off-diagonal term
-        endif
-
         do j=1,ni
-         jm=ns+1+j+1
-!         DT0(jm) =  - (henew(j)*sali(j,1)-heold(j)*sali(j,0)) / dtice & ! time tendency energy
-!                       + wb(j-1) * sibr(j-1,1) * wsb(j-1)   & ! upward brine lower transport
-!                       + wb(j-1) * sibr(j  ,1) * wob(j-1)   & ! lower transport
-!                       - wb(j  ) * sibr(j  ,1) * wsb(j  )   & ! upper transport
-!                       - wb(j  ) * sibr(j+1,1) * wob(j  )   & ! upper transport
-!                       + w (j-1) * sali(j-1,1) * wsg(j-1)   & ! lower transport
-!                       + w (j-1) * sali(j  ,1) * wog(j-1)   & ! lower transport
-!                       - w (j  ) * sali(j  ,1) * wsg(j  )   & ! upper transport
-!                       - w (j  ) * sali(j+1,1) * wog(j  )   & ! upper transport
-!                       - um(j  ) * sali(j  ,1)              & ! melting flushing
-!                       - ub(j  ) * sibr(j  ,1)                ! flushing of brine into brine channels due to upward brine transport
-!           matj(jm  ,jm) = henew(j) * sibr(j,1) / dtice            ! diagonal term
-! FD debug assume salinity is constant
-            dt0(jm)    = sali(j,1) / sibr(j,1) - phib(j,1)
-           matj(jm,jm) = 1.0_8
-           matj(j ,jm) = dsidt(j) * sali(j,1) / sibr(j,1)**2 
-!! transport terms
-!           matj(jm  ,jm) = matj(jm  ,jm)                  &
-!                       - w (j-1) * sibr(j  ,1) * wog(j-1) &  ! lower transport
-!                       + w (j  ) * sibr(j  ,1) * wsg(j  ) &  ! upper transport
-!                       + um(j)   * sibr(j  ,1)               ! right hand were melting occurs
-!           matj(jm-1,jm) = matj(jm-1,jm)                  &
-!                       - w (j-1) * sibr(j-1,1) * wsg(j-1)    ! lower transport
-!           if (j<ni) &
-!           matj(jm+1,jm) = matj(jm+1,jm)                  &
-!                       + w (j  ) * sibr(j+1,1) * wog(j  )    ! upper transport
-!! temperature effect on salinity
-!           matj(j   ,jm) =                                               &
-!                        henew(j) * dsidt(j    ) * phib(j  ,1) / dtice      ! diagonal term
-!           matj(j-1 ,jm) = matj(j-1 ,jm)                                 &
-!                       - wb(j-1) * dsidt(j-1  )               * wsb(j-1) & ! upward brine lower transport
-!                       - w (j-1) * dsidt(j-1  ) * phib(j-1,1) * wsg(j-1)   ! lower transport
-!           matj(j   ,jm) = matj(j   ,jm)                                 &
-!                       - wb(j-1) * dsidt(j    )               * wob(j-1) & ! lower transport
-!                       + wb(j  ) * dsidt(j    )               * wob(j  ) & ! upper transport
-!                       - w (j-1) * dsidt(j    ) * phib(j  ,1) * wog(j-1) & ! lower transport
-!                       + w (j  ) * dsidt(j    ) * phib(j  ,1) * wsg(j  ) & ! upper transport
-!                       + ub(j  ) * dsidt(j    )                          & ! flushing of brine into brine channels due to upward brine
-!                       + um(j  ) * dsidt(j    ) * phib(j  ,1)              ! melting flushing
-!           matj(j+1 ,jm) = matj(j+1 ,jm)                                 &
-!                       + wb(j  ) * dsidt(j+1  )               * wob(j  ) & ! upper transport
-!                       + w (j  ) * dsidt(j+1  ) * phib(j+1,1) * wog(j  )   ! upper transport
+         jm=ns+1+j
+         DT0(jm) =  - (henew(j)*sali(j,1)-heold(j)*sali(j,0)) / dtice & ! time tendency energy
+                       + wb(j-1) * sibr(j-1,1) * wsb(j-1)   & ! upward brine lower transport
+                       + wb(j-1) * sibr(j  ,1) * wob(j-1)   & ! lower transport
+                       - wb(j  ) * sibr(j  ,1) * wsb(j  )   & ! upper transport
+                       - wb(j  ) * sibr(j+1,1) * wob(j  )   & ! upper transport
+                       + w (j-1) * sali(j-1,1) * wsg(j-1)   & ! lower transport
+                       + w (j-1) * sali(j  ,1) * wog(j-1)   & ! lower transport
+                       - w (j  ) * sali(j  ,1) * wsg(j  )   & ! upper transport
+                       - w (j  ) * sali(j+1,1) * wog(j  )   & ! upper transport
+                       - um(j  ) * sali(j  ,1)              & ! melting flushing
+                       - ub(j  ) * sibr(j  ,1)                ! flushing of brine into brine channels due to upward brine transport
+           matj(jm  ,jm) = henew(j) * sibr(j,1) / dtice            ! diagonal term
+           matj(jm  ,jm) = matj(jm  ,jm)                  &
+                       - w (j-1) * sibr(j  ,1) * wog(j-1) &  ! lower transport
+                       + w (j  ) * sibr(j  ,1) * wsg(j  ) &  ! upper transport
+                       + um(j)   * sibr(j  ,1)               ! right hand were melting occurs
+           if (j>1) &
+           matj(jm-1,jm) = matj(jm-1,jm)                  &
+                       - w (j-1) * sibr(j-1,1) * wsg(j-1)    ! lower transport
+           if (j<ni) &
+           matj(jm+1,jm) = matj(jm+1,jm)                  &
+                       + w (j  ) * sibr(j+1,1) * wog(j  )    ! upper transport
+! temperature effect on salinity
+           matj(j   ,jm) =                                               &
+                        henew(j) * dsidt(j    ) * phib(j  ,1) / dtice      ! diagonal term
+           if (j>1) &
+           matj(j-1 ,jm) = matj(j-1 ,jm)                                 &
+                       - wb(j-1) * dsidt(j-1  )               * wsb(j-1) & ! upward brine lower transport
+                       - w (j-1) * dsidt(j-1  ) * phib(j-1,1) * wsg(j-1)   ! lower transport
+           matj(j   ,jm) = matj(j   ,jm)                                 &
+                       - wb(j-1) * dsidt(j    )               * wob(j-1) & ! lower transport
+                       + wb(j  ) * dsidt(j    )               * wob(j  ) & ! upper transport
+                       - w (j-1) * dsidt(j    ) * phib(j  ,1) * wog(j-1) & ! lower transport
+                       + w (j  ) * dsidt(j    ) * phib(j  ,1) * wsg(j  ) & ! upper transport
+                       + ub(j  ) * dsidt(j    )                          & ! flushing of brine into brine channels due to upward brine
+                       + um(j  ) * dsidt(j    ) * phib(j  ,1)              ! melting flushing
+           if (j<ni) &
+           matj(j+1 ,jm) = matj(j+1 ,jm)                                 &
+                       + wb(j  ) * dsidt(j+1  )               * wob(j  ) & ! upper transport
+                       + w (j  ) * dsidt(j+1  ) * phib(j+1,1) * wog(j  )   ! upper transport
         enddo
 
 ! reset terms depending on velocity (j=0 and/or j=ns+1)
 ! Newton terms for change in thickness in rho h E: 
 !    d(h S)/d(w0)= S dh/dw0 = S ds; d(h)/d(ws)=-ds
-!      do j=1,ni
-!         jm=ns+1+j+1
-!         matj(0   ,jm) =   sali(j,1) * dzi(j)
-!      enddo
-!      if ( Tsbc .and. ns==ni) then ! definitily ice
-!       do j=1,ni
-!         jm=ns+1+j+1
-!         matj(ns+1,jm) = - sali(j,1) * dzi(j)
-!       enddo
-!      endif
+      do j=1,ni
+         jm=ns+1+j
+         matj(0   ,jm) =   sali(j,1) * dzi(j)
+      enddo
+      if ( Tsbc .and. ns==ni) then ! definitily ice
+       do j=1,ni
+         jm=ns+1+j
+         matj(ns+1,jm) = - sali(j,1) * dzi(j)
+       enddo
+      endif
+
+! metric terms, newton terms for change in thickness for lower transport
+
+! bottom velocity
+           do j=1,ni
+         jm=ns+1+j
+            matj(0   ,jm) = matj(0   ,jm) - sali(j-1,1) * os(1,j) * wsg(j-1)
+            matj(0   ,jm) = matj(0   ,jm) - sali(j  ,1) * os(1,j) * wog(j-1)
+           enddo
+
+! top velocity
+          if ( Tsbc .and. ns==ni) then ! definitily ice
+           do j=2,ns
+         jm=ns+1+j
+            matj(ns+1,jm) = matj(ns+1,jm) - sali(j-1,1) * cs(1,j) * wsg(j-1)
+            matj(ns+1,jm) = matj(ns+1,jm) - sali(j  ,1) * cs(1,j) * wog(j-1)
+           enddo
+          endif
+
+! metric terms, newton terms for change in thickness for upper transport
+          do j=1,ns-1
+         jm=ns+1+j
+            matj(0   ,jm) = matj(0   ,jm) + sali(j  ,1) * os(2,j) * wsg(j)
+            matj(0   ,jm) = matj(0   ,jm) + sali(j+1,1) * os(2,j) * wog(j)
+          enddo
+          if ( Tsbc  .and. ns==ni) then ! definitily ice
+           do j=1,ns
+         jm=ns+1+j
+            matj(ns+1,jm) = matj(ns+1,jm) + sali(j  ,1) * cs(2,j) * wsg(j)
+            matj(ns+1,jm) = matj(ns+1,jm) + sali(j+1,1) * cs(2,j) * wog(j)
+           enddo
+          endif
 
 !-----------------------------------------------------------------------
 ! prepare linear solver
@@ -1201,11 +1228,11 @@ endif
       temp(ns+2:ni+nlsno+1,1) = temp(ns+1,1)
 
 ! liquid fraction
-      DO j=0,ni
-         jm = j+ns+2
+      DO j=1,ni
+         jm = j+ns+1
          phib(j,1) = phib(j,1) + tout(jm)
          sibr(j,1) = func_liqu_sa(temp(j,1))
-! FD debug         sali(j,1) = phib(j,1) * sibr(j,1)
+         sali(j,1) = phib(j,1) * sibr(j,1)
       ENDDO
 
 ! From now on, ns retrieves its original sense
