@@ -55,7 +55,7 @@
      &  zl0      ,  !: old layer interfaces
      &  zl1         !: new layer interfaces
 
-      REAL(8), DIMENSION ( nbot1, nbot0 ) ::
+      REAL(8) ::
      &  rl01        !: relayering matrix
 
       INTEGER ::
@@ -104,36 +104,41 @@
 !  1) Relayering procedure                                                     |
 !------------------------------------------------------------------------------|
 !
-        !---------
-        ! weights
-        !---------
-        DO layer1 = ntop1, nbot1
-           DO layer0 = ntop0, nbot0
-               rl01(layer1,layer0) = MAX( 0.0 , ( MIN(zl0(layer0), 
-     &         zl1(layer1)) - MAX(zl0(layer0-1), zl1(layer1-1) ) ) / 
-     &         MAX( hl0(layer0) , zlimit ) ) 
-               IF (ln_write) WRITE(numout,*) ' Weight : ', 
-     &                       layer0, layer1, rl01(layer1,layer0)
-           END DO
-        END DO
-
         !-------------
         ! new scalars
         !-------------
         IF (ln_write) WRITE(numout,*) ' Redistribution of the scalar '
-        DO layer1 = ntop1, nbot1
-           ql1(layer1) = 0.0
-           DO layer0 = ntop0, nbot0
-     
-              ql1(layer1) = ql1(layer1) + 
-     &                         rl01(layer1,layer0) * ql0(layer0)
+! FD this version works
+!        DO layer1 = ntop1, nbot1
+!           ql1(layer1) = 0.0
+!           DO layer0 = ntop0, nbot0
+!     
+!               rl01 = MAX( 0.0 , ( MIN(zl0(layer0), 
+!     &         zl1(layer1)) - MAX(zl0(layer0-1), zl1(layer1-1) ) ) / 
+!     &         MAX( hl0(layer0) , zlimit ) ) 
+!              ql1(layer1) = ql1(layer1) + rl01 * ql0(layer0)
+!              IF (ln_write) WRITE(numout,*) ' ql1 : ', ql1(layer1)
+!              IF (ln_write) WRITE(numout,*) ' ql0 : ', ql0(layer0)
+!              IF (ln_write) WRITE(numout,*) ' rl01: ', rl01
+!           END DO
+!        END DO
+         ql1(ntop1:nbot1) = 0.0
+         layer0 = ntop0
+         layer1 = ntop1
+         do while (layer0 <= nbot0 .and. layer1 <= nbot1)
+               rl01 = MAX( 0.0 , ( MIN(zl0(layer0), 
+     &         zl1(layer1)) - MAX(zl0(layer0-1), zl1(layer1-1) ) ) / 
+     &         MAX( hl0(layer0) , zlimit ) ) 
+              ql1(layer1) = ql1(layer1) + rl01 * ql0(layer0)
               IF (ln_write) WRITE(numout,*) ' ql1 : ', ql1(layer1)
               IF (ln_write) WRITE(numout,*) ' ql0 : ', ql0(layer0)
-              IF (ln_write) WRITE(numout,*) ' rl01: ', 
-     &                      rl01(layer1,layer0)
-           END DO
+              IF (ln_write) WRITE(numout,*) ' rl01: ', rl01
+            if (zl0(layer0) > zl1(layer1)) then
+               layer1 = layer1 + 1
+            else
+               layer0 = layer0 + 1
+            endif
         END DO
-
         IF (ln_write) WRITE(numout,*) ' ql1 : ', 
      &                ( ql1(jk), jk = ntop1, nbot1 )
 

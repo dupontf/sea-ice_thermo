@@ -53,6 +53,7 @@
      &   zthick0                 !: thickness of old layers
 ! FD additions
       LOGICAL ln_con
+      REAL(8) :: zeps
 
       ! Local Constants
       zeps   = 1.0e-20
@@ -96,8 +97,8 @@
 !------------------------------------------------------------------------------|
 !
       ! snow surface behaviour : calcul de snind-snswi
-      ! snind : index tel que sa valeur est 0 si la neige s'accrète
-      !                1 si la 1ere couche est entamée par la fonte
+      ! snind : index tel que sa valeur est 0 si la neige s'accr?te
+      !                1 si la 1ere couche est entam?e par la fonte
       !                2 si la 2eme ....
       !                                  etc ...
       snind    =  0  

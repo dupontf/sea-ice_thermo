@@ -223,7 +223,7 @@ c     filename  = name  of the netcdf file
 
       INTEGER        UN1_dim(0:CF_dimnbrtot)
 
-      REAL           UN1_dimval(CF_dimmaxlen,0:CF_dimnbrtot)
+      REAL(4)        UN1_dimval(CF_dimmaxlen,0:CF_dimnbrtot)
 
       CHARACTER*31   UN1_dimnam(0:CF_dimnbrtot),
      .               UN1_dimnamuni(0:CF_dimnbrtot) 
@@ -237,11 +237,22 @@ c     filename  = name  of the netcdf file
        UN1_dim(i)       = CF_dim(i)
        UN1_dimnam(i)    = CF_dimnam(i)
        UN1_dimnamuni(i) = CF_dimnamuni(i)
+! FD debug
+      write(*,*) i,TRIM(UN1_dimnam(i)),CF_dim(i)
        DO j=1,CF_dim(i)
         UN1_dimval(j,i) = CF_dimval(j,i)
        END DO
       END DO
 
+! FD debug
+!      write(*,*) CF_filenam
+!      write(*,*) CF_filetit,CF_dimnbrtot,UN1_dim
+!      write(*,*) CF_dimmaxlen, UN1_dimnam ,UN1_dimnamuni
+!      write(*,*) UN1_dimval
+!      write(*,*) CF_varmaxnbr,CF_varnbrtot,CF_varnam
+!      write(*,*) CF_varnamdim,CF_varnamuni,CF_vardes
+!      write(*,*) CF_attnbr,CF_attnam,CF_attnum,id
+!      stop
       call UNscreate (CF_filenam,CF_filetit,CF_dimnbrtot,UN1_dim,
      .                CF_dimmaxlen, UN1_dimnam ,UN1_dimnamuni,
      .                UN1_dimval,
@@ -654,7 +665,7 @@ C     ------------------
       IF (icheck.ge.1) WRITE(*,*) 'UNscreate : Begin'
 
 C +   Routines which opens a file must reset libUN internals:
-      CALL UNparam('RESET_PARAMS_',0.0)
+      CALL UNparam('RESET_PARAMS_',0.0_4)
 
       DO ii = 1,4
         stride(ii) = 1
@@ -704,6 +715,10 @@ C     ** Define variable for the time coordinate values :
       Ierro=NF_DEF_VAR(FILEid , 'time', NF_FLOAT,1 , dID,  dimVID(0))
 C     **      ^^^^^^^^^^ FILEid  var name  type  dims  DIMid VARid  
       IF (Ierro.NE.NF_NOERR) CALL HANDLE_ERR('UNscreate', Ierro)
+      TTerr = TTerr + ABS(Ierro)
+! FD add calendar definition
+      Ierro=  NF_PUT_ATT_TEXT(FILEid , dimVID(0) ,'calendar',
+     &                          7   ,'360_DAY')
       TTerr = TTerr + ABS(Ierro)
 
 
@@ -2469,7 +2484,7 @@ C     ** local :
       icheck=0
       
 C +   Routines which opens a file must reset libUN internals:
-      CALL UNparam('RESET_PARAMS_',0.0)
+      CALL UNparam('RESET_PARAMS_',0.0_4)
       
 C     ** Open NetCDF file, for read-only:
 C     -----------------------------------
@@ -2522,7 +2537,7 @@ C     ** local :
       IF (icheck.ge.2) WRITE(*,*) 'FILEnam: ', FILEnam
 
 C +   Routines which opens a file must reset libUN internals:
-      CALL UNparam('RESET_PARAMS_',0.0)
+      CALL UNparam('RESET_PARAMS_',0.0_4)
 
 C     ** Open NetCDF file, for read-only:
 C     -----------------------------------

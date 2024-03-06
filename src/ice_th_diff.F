@@ -66,12 +66,15 @@
       INCLUDE 'bloc.com'
       INCLUDE 'ice.com'
       INCLUDE 'thermo.com'
-      LOGICAL :: ln_write=.true.
+      LOGICAL :: ln_write=.false.
+      LOGICAL,SAVE :: start=.true.
 
       DO ji = kideb, kiut
 
         nlsno = nlay_s
         nlice = nlay_i
+        if (start) call allocate_thermo_1d
+        start=.false.
 
         do layer = 1, nlay_i
           ti(layer) = t_i_b(ji,layer)
@@ -93,14 +96,16 @@
         tsu = t_su_b(ji)
         tbo = t_bo_b(ji)
 
-        tair = tabqb(ji) 
-        qair = qabqb(ji)
-        uair = vabqb(ji)
+        fsens = fscbqb(ji)
+        flat = fltbqb(ji)
+        tair = tp0-10.d0
+        qair = 1d-3
+        uair = 1.d0
         oceflx = oce_flx
         dwnlw = ratbqb(ji)
         swrad = fsolgb(ji)
         fac_transmi = ab(ji)
-        pres   = psbqb(ji)
+        pres   = 1d5
         snowfall = hnpbqb(ji) / 86400.d0 ! convert to m/s because Martin has in in m/day
         seasal = oce_sal
         snosub = parsub
@@ -144,6 +149,13 @@
           s_i_b(ji,layer) = si(layer)
           q_i_b(ji,layer) = qi(layer)
           deltaz_i_phy(layer) = dzi(layer)
+        enddo
+
+! brine info
+        do layer = 1, nlay_i
+          rayleigh(layer) = brine_r(layer)
+          brvolum (layer) = brine_v(layer)
+          brflush (layer) = brine_u(layer)
         enddo
 
         do layer = 1, nlay_s

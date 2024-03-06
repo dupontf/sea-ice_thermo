@@ -98,25 +98,40 @@
 !--COMMON blocs :
 !
 !------------------------------------------------------------------------------
-      COMMON /ice_grid/
+      real(8)
      &  deltaz_i_phy(maxnlay) ,       !: thicknesses of the physical ice layers
      &  z_i_phy(maxnlay)      ,       !: cotes of the physical ice layers
      &  deltaz_s_phy(maxnlay) ,       !: thicknesses of the physical snow layers
      &  z_s_phy(maxnlay)              !: cotes of the physical snow layers
 
-      COMMON / ice_constants /
+      COMMON /ice_grid/
+     &  deltaz_i_phy,z_i_phy,deltaz_s_phy,z_s_phy
+
+      real(8)
      &  tfsn,tfsg,xkn,xkg,rcpn,rcpg,rhog,rhon,
      &  emig,sglace,hmelt,acrit(2),hgcrit(2),hgmin,hndif,
      &  hgdif,hglim,amax,uscomi,beta,ddtb,swiqst,parlat,
      &  hakspl,hibspl,exld,hakdif,hth,hnzst,parsub,cnscg,nbits
 
+      COMMON / ice_constants /
+     &  tfsn,tfsg,xkn,xkg,rcpn,rcpg,rhog,rhon,
+     &  emig,sglace,hmelt,acrit,hgcrit,hgmin,hndif,
+     &  hgdif,hglim,amax,uscomi,beta,ddtb,swiqst,parlat,
+     &  hakspl,hibspl,exld,hakdif,hth,hnzst,parsub,cnscg,nbits
+
+      real(8)
+     &  stefan,xsn,vkarmn,cevap,zemise,rhoesn
+     
       COMMON / fluxsf /
      &  stefan,xsn,vkarmn,cevap,zemise,rhoesn
      
-      COMMON / comdia /
+      real(8)
      &  firg(imax,jmax),fcsg(imax,jmax),fleg(imax,jmax)
 
-      COMMON / comban /
+      COMMON / comdia /
+     &  firg,fcsg,fleg
+
+      real(8)
 ! FD     &  ts(imax,jmax),tfu(imax,jmax),hnbq(imax,jmax),
      &  tfu(imax,jmax),hnbq(imax,jmax),
      &  hgbq(imax,jmax),hgbqp(imax,jmax),albq(imax,jmax),
@@ -127,7 +142,18 @@
      &  fsbbq(imax,jmax),qfvbq(imax,jmax),xzo(imax,jmax),
      &  dmgwi(imax,jmax),total(imax,jmax)
 c
-      COMMON / comfor /
+      COMMON / comban /
+! FD     &  ts,tfu,hnbq,
+     &  tfu,hnbq,
+     &  hgbq,hgbqp,albq,
+     &  qstobq,fbbq,
+     &  dmnbq,dmgbq,
+     &  qlbq,qcmbq,thcm,
+     &  fstrbq,ffltbq,fscmbq,
+     &  fsbbq,qfvbq,xzo,
+     &  dmgwi,total
+c
+      real(8)
      &  psbq(imax,jmax),tabq(imax,jmax),
      &  qabq(imax,jmax),vabq(imax,jmax),
      &  hnplbq(imax,jmax),fevabq(imax,jmax),fsolcn(imax,jmax),
@@ -140,16 +166,38 @@ c
      &  albecn(imax,jmax),tauc(imax,jmax),runoff(imax,jmax),
      &  sdvt(imax,jmax),fsolg2(imax,jmax)
 
-      COMMON / comca /
+      COMMON / comfor /
+     &  psbq,tabq,
+     &  qabq,vabq,
+     &  hnplbq,fevabq,fsolcn,
+     &  hnpbq, 
+     &  fsolg,flecn,fcscn,
+     &  tenagx,tenagy,albg,
+     &  albege,tairox,tairoy,
+     &  ratbqg,ratbqo,cloud,
+     &  tdew,
+     &  albecn,tauc,runoff,
+     &  sdvt,fsolg2
+
+      real(8)
      &  fcm1(imax,jmax),fcm2(imax,jmax),
      &  fwat(imax,jmax),
      &  reslum(imax,jmax,0:kmax+1)
 
+      COMMON / comca /
+     &  fcm1,fcm2,fwat,reslum
+
 c global characteristics of the ice pack
-      COMMON / ice_global /
+      real(8)
      &  t_i(imax,jmax,maxnlay),t_s(imax,jmax,maxnlay),t_su(imax,jmax),
      &  t_bo(imax,jmax),ht_s(imax,jmax),ht_i(imax,jmax),
      &  s_i(imax,jmax,maxnlay)
+
+      COMMON / ice_global /
+     &  t_i,t_s,t_su,t_bo,ht_s,ht_i,s_i
+
+      real(8)
+     &  fc_int
 
       COMMON / heat_fluxes /
      &  fc_int
@@ -165,27 +213,53 @@ c     Number of layers in the ice and snow
 
       COMMON/layers/ n_i, n_s, thcon_i_swi
 
-      COMMON/simip/zsim(0:maxnlay),tempsim(maxnlay),salsim(maxnlay),
+      real(8) 
+     &    zsim(0:maxnlay),tempsim(maxnlay),salsim(maxnlay),
      &             tempint(maxnlay),salint(maxnlay),
      &             thick0(maxnlay),
      &             thick1(maxnlay),
      &             hsold,hgold,hsnew,hgnew
  
-      COMMON/vertres/zm0(0:maxnlay),zm1(0:maxnlay),qm0(maxnlay),
+      COMMON/simip/zsim,tempsim,salsim,
+     &             tempint,salint,
+     &             thick0,
+     &             thick1,
+     &             hsold,hgold,hsnew,hgnew
+ 
+      real(8) zm0(0:maxnlay),zm1(0:maxnlay),qm0(maxnlay),
      &              qm1(0:maxnlay+2), sal_new_layer
+
+      COMMON/vertres/zm0,zm1,qm0,qm1, sal_new_layer
+
+      real(8) xlgm,xlgn,cpg,cpw,gammac,betak,tmut,tpw,
+     &              cpoc,deltah, betak1, betak2, visc_br, beta_ocs
 
       COMMON/heateqcoe/xlgm,xlgn,cpg,cpw,gammac,betak,tmut,tpw,
      &              cpoc,deltah, betak1, betak2, visc_br, beta_ocs
 
-      COMMON/barrowconf/sal_read(11), hi_read(11), hgins, hnins,
+      real(8) sal_read(11), hi_read(11), hgins, hnins,
      &              tsuins, oce_sal, oce_flx, num_sal, nday1,
      &              ipremjour, 
      &              i_sal
      
+      COMMON/barrowconf/sal_read, hi_read, hgins, hnins,
+     &              tsuins, oce_sal, oce_flx, num_sal, nday1,
+     &              ipremjour, 
+     &              i_sal
+     
+      real(8) numd_sn1, numd_sn2, numd_sn3, 
+     &                  sn_prec_1, sn_prec_2
+
       COMMON/snowprecip/numd_sn1, numd_sn2, numd_sn3, 
      &                  sn_prec_1, sn_prec_2
 
+      real(8) sf_mult, tabq_ano
+
       COMMON/tuneforcing/sf_mult, tabq_ano
+
+      real(8) flu_beta, flu_bvtr, rad_io,
+     &                frtr_si_phy, qsummer, d_br_mol, d_br_tur,
+     &                ra_c, ra_smooth, e_tres, delta_cw, ini_swi, s_ini
 
       COMMON/fluidtpt/flu_beta, flu_bvtr, rad_io,
      &                frtr_si_phy, qsummer, d_br_mol, d_br_tur,

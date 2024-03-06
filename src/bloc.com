@@ -43,7 +43,7 @@ Csai &  d2txms(imax,jmax,nmois),d2tyms(imax,jmax,nmois),
 Csai &  flxss(imax,jmax,nsmax,nmois),d2fxss(imax,jmax,nsmax,nmois),
 Csai &  flxsur(imax,jmax,nsmax)
  
-      common / forcing /
+      common / bulk_forcing /
      &  scal0(kmax,nsmax), spvr, scalr(imax,jmax,kmax,nsmax),
      &  rappel(imax,jmax,kmax),rappes(imax,jmax,kmax,nsmax),ahrap,
      &  rappes1(1,1,kmax,26),rappes2(1,1,kmax,28),rappes3(1,1,kmax,29),
@@ -104,7 +104,7 @@ Ccpl &  zvolsba(0:nbsmax), zvoloba(0:nbsmax),
      &  nxslp, nxyslp
  
       common / lerun /
-     &  nstart,nend,nitrun,nlast,nsav,ninfo,
+     &  nstart,nend,nitrun,nlast,nsav,ninfo,nfr_out,
      &  nwjl,nwtal,nwm,nwa,nwtest,idyn,nit,premjour,TMIN,JIMP,indice1,
      &  indice2,indice3,indice4,lstab,kstart,kinput,koutpu,
      &  nitrap, ntmoy,lecture,

@@ -32,11 +32,12 @@
       INCLUDE 'thermo.com'
       INCLUDE 'bio.com'
 
-      DIMENSION ain(imax,jmax),zinda(imax,jmax),ifvt(imax,jmax)
-      DIMENSION qdtcn(imax,jmax),qlbsbq(imax,jmax),zfwat(imax,jmax)
-      DIMENSION zhgbqp(imax,jmax)
-      DIMENSION fdtcn(imax,jmax)
+      REAL(8) :: ain(imax,jmax),zinda(imax,jmax),ifvt(imax,jmax)
+      REAL(8) :: qdtcn(imax,jmax),qlbsbq(imax,jmax),zfwat(imax,jmax)
+      REAL(8) :: zhgbqp(imax,jmax)
+      REAL(8) :: fdtcn(imax,jmax)
       COMMON/lowat/ zfwat
+      INTEGER :: ntrmax
 
       ! Energy conservation
       LOGICAL con_i
@@ -47,12 +48,14 @@
 
       con_i = .true. ! conservation check in the ice or not
       jl = 1         ! category number (temporary)
+! FD debug
+      con_i = .false. ! conservation check in the ice or not
 
-      WRITE(numout,*) ' * ice_th : '
-      WRITE(numout,*) ' ~~~~~~~~~~ '
-      WRITE(numout,*) 
-      WRITE(numout,*) ' nlay_i : ', nlay_i
-      WRITE(numout,*) ' nlay_s : ', nlay_s
+! FD      WRITE(numout,*) ' * ice_th : '
+! FD      WRITE(numout,*) ' ~~~~~~~~~~ '
+! FD      WRITE(numout,*) 
+! FD      WRITE(numout,*) ' nlay_i : ', nlay_i
+! FD      WRITE(numout,*) ' nlay_s : ', nlay_s
 !
 !-------------------------------------------------------------------------------
 !  1. Convert vectors
@@ -71,9 +74,11 @@
       CALL gather(nbpb,tabqb,tabq,npb)     ! air temperature
       CALL gather(nbpb,qabqb,qabq,npb)     ! air humidity
       CALL gather(nbpb,vabqb,vabq,npb)     ! wind velocity
+      CALL gather(nbpb,fscbqb,fsbbq,npb)  ! sensible heat flux
+      CALL gather(nbpb,fltbqb,ffltbq,npb)  ! latent heat flux
 
       CALL gather(nbpb,tdewb,tdew,npb)     ! relative air humidity (output)
-      CALL gather(nbpb,albgb,albg,npb)     ! relative air humidity (output)
+      CALL gather(nbpb,albgb,albg,npb)     ! albedo (output)
 
       CALL gather(nbpb,t_su_b,t_su,npb)    ! surface temperature
       CALL gather(nbpb,t_bo_b,t_bo,npb)    ! bottom temperature
@@ -152,29 +157,29 @@
 
 ! FD      IF ( ln_trremp .AND. ( c_mod .EQ. 'ML' ) )  
 ! FD     &   CALL ice_bio_remap(nlay_s, nlay_i, 1, nbpb)               ! bio remapping
-
-      !---------------
-      ! Chlorophyll a
-      !---------------
-      ! Units, mg m-3 (micro g.l-1)
+! FD
+! FD      !---------------
+! FD      ! Chlorophyll a
+! FD      !---------------
+! FD      ! Units, mg m-3 (micro g.l-1)
 ! FD      DO layer = 1, nlay_bio
 ! FD         chla_i_bio(layer) = cbu_i_bio(4,layer) * chla_c
 ! FD      END DO
-
-      WRITE(numout,*)
-      WRITE(numout,*) '    *** After tracer remapping *** '
-      WRITE(numout,*) '    model output '
-
-      DO jn = 1, ntra_bio
-         IF ( flag_active(jn) ) THEN
-           WRITE(numout,*) ' biotr_i_nam : ', biotr_i_nam(jn)
-           WRITE(numout,*) ' cbu_i_bio : ', ( cbu_i_bio(jn, jk), jk = 1,
-     &                                        nlay_bio )
-         ENDIF
-      END DO
-      WRITE(numout,*) ' chla_i_bio : ', ( chla_i_bio(layer), layer = 1, 
-     &                                    nlay_bio )
-      WRITE(numout,*)
+! FD
+! FD      WRITE(numout,*)
+! FD      WRITE(numout,*) '    *** After tracer remapping *** '
+! FD      WRITE(numout,*) '    model output '
+! FD
+! FD      DO jn = 1, ntra_bio
+! FD         IF ( flag_active(jn) ) THEN
+! FD           WRITE(numout,*) ' biotr_i_nam : ', biotr_i_nam(jn)
+! FD           WRITE(numout,*) ' cbu_i_bio : ', ( cbu_i_bio(jn, jk), jk = 1,
+! FD     &                                        nlay_bio )
+! FD         ENDIF
+! FD      END DO
+! FD      WRITE(numout,*) ' chla_i_bio : ', ( chla_i_bio(layer), layer = 1, 
+! FD     &                                    nlay_bio )
+! FD      WRITE(numout,*)
 !
 !-------------------------------------------------------------------------------
 !  4) Outputs 

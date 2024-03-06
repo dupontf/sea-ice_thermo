@@ -23,8 +23,8 @@
 
 !==============================================================================!
  
-      WRITE(numout,*) ' ** ice_rad : '
-      WRITE(numout,*) ' ~~~~~~~~~~~~ '
+! FD      WRITE(numout,*) ' ** ice_rad : '
+! FD      WRITE(numout,*) ' ~~~~~~~~~~~~ '
 
       DO ji = kideb, kiut
 !
@@ -115,10 +115,10 @@
 !  4) Radiation transmitted through / absorbed by ice                          !
 !------------------------------------------------------------------------------!
 !
-      WRITE(numout,*)
-      WRITE(numout,*) ' Radiation absorption in ice '
-      WRITE(numout,*) ' ~~~~~~~~~~~~~~~~~~~~~~~~~~~ '
-      WRITE(numout,*)
+! FD      WRITE(numout,*)
+! FD      WRITE(numout,*) ' Radiation absorption in ice '
+! FD      WRITE(numout,*) ' ~~~~~~~~~~~~~~~~~~~~~~~~~~~ '
+! FD      WRITE(numout,*)
       ! transmitted at the upper ice layer
       radtr_i(0) = isnow * radtr_s(nlay_s)  + ( 1. - isnow ) * ftrice
 
@@ -147,9 +147,9 @@
       ! radiation sent to the ocean
       ftroce = radtr_i(nlay_i)
        
-      WRITE(numout,*) ' i0     : ', 1.0-ab(ji)
-      WRITE(numout,*) ' ftrice : ', ftrice
-      WRITE(numout,*) ' ftroce : ', ftroce
+! FD      WRITE(numout,*) ' i0     : ', 1.0-ab(ji)
+! FD      WRITE(numout,*) ' ftrice : ', ftrice
+! FD      WRITE(numout,*) ' ftroce : ', ftroce
 
 !     WRITE(numout,*) ' radtr_i : ', 
 !    &                ( radtr_i(layer) , layer = 0, nlay_i )
@@ -194,13 +194,13 @@
       DO layer = 1, nlay_i
          sumrad = sumrad + radab_phy_i(layer) + radab_alg_i(layer)
       END DO
-      WRITE(numout,*) ' Conservation check '
-      WRITE(numout,*) ' ftrice - ftroce : ', ftrice-ftroce
-      WRITE(numout,*) ' sumrad          : ', sumrad
+! FD      WRITE(numout,*) ' Conservation check '
+! FD      WRITE(numout,*) ' ftrice - ftroce : ', ftrice-ftroce
+! FD      WRITE(numout,*) ' sumrad          : ', sumrad
 
       END DO !ji
 
-      WRITE(numout,*)
+! FD      WRITE(numout,*)
 !     WRITE(numout,*) ' End of ice_rad '
 !     WRITE(numout,*) '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
 !==============================================================================!

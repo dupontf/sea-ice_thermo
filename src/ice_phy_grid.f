@@ -15,6 +15,8 @@
      &  ji          , ! : index for space
      &  jk            ! : index for ice layers
 
+      REAL(8) :: zht_i
+      INTEGER :: kideb,kiut,nlay
       CHARACTER(len=3) :: 
      &   snoorice     ! : message indicating whether we have to compute ice or snow
 ! FD additions
@@ -39,13 +41,13 @@
       !---------------------------
       IF ( snoorice .EQ. 'ice' ) THEN
          DO layer = 1, nlay
-            deltaz_i_phy(layer) = zht_i / nlay
+            deltaz_i_phy(layer) = zht_i / REAL(nlay,8)
          END DO
       ENDIF
 
       IF ( snoorice .EQ. 'sno' ) THEN
          DO layer = 1, nlay
-            deltaz_s_phy(layer) = zht_i / nlay
+            deltaz_s_phy(layer) = zht_i / REAL(nlay,8)
          END DO
       ENDIF
 

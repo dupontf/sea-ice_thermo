@@ -46,9 +46,10 @@
       INCLUDE 'thermo.com'
 
       ! Local Variables
-      DIMENSION zrchu1(nbpt), zrchu2(nbpt), zqsat(nbpt), z_f_surf(nbpt) 
-      DIMENSION zdeltah(maxnlay)
+      REAL(8) :: zrchu1(nbpt), zrchu2(nbpt), zqsat(nbpt), z_f_surf(nbpt) 
+      REAL(8) :: zdeltah(maxnlay)
       LOGICAL l_write
+      REAL(8) :: zgrr
 
       zqt_s_ini = 0.0
       zqt_s_fin = 0.0

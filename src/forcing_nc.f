@@ -41,6 +41,7 @@
 
       REAL(4)        zforc(1), zforc2(2) ! forcing field dummy array
       DIMENSION ws(96),zmue(96),zalcnp(96) ! for solar flux formula
+      real(8) :: zps
 
       DIMENSION budyko(19)
 ! FD addition
@@ -482,8 +483,6 @@
          WRITE(numout,*) ' tabq        : ', tabq(i,j)
          WRITE(numout,*) ' psbq        : ', psbq(i,j)
          WRITE(numout,*) ' qabq        : ', qabq(i,j)
-         WRITE(numout,*) ' vabq        : ', vabq(i,j)
-         WRITE(numout,*) ' cloud       : ', cloud(i,j)
          WRITE(numout,*) ' oce_flx     : ', oce_flx
          WRITE(numout,*) ' hnpbq       : ', hnpbq(i,j)
          WRITE(numout,*) ' albg        : ', albg(i,j)
@@ -494,3 +493,136 @@
 ! end of forcing 
       RETURN
       END
+
+      SUBROUTINE forcing_semtner(xjour)
+
+        !!------------------------------------------------------------------
+        !!                ***       ROUTINE forcing      ***
+        !! ** Purpose :
+        !!      This routine computes the model forcing
+        !!       forc_swi = 0 -> read
+        !!                  1 -> computed
+        !!                 99 -> prescribed
+        !!
+        !! ** Method  :
+        !!
+        !! ** Arguments :
+        !!
+        !! ** Inputs / Ouputs : (global commons)
+        !! 
+        !! ** External : 
+        !!
+        !! ** References : 
+        !!
+        !! ** History :
+        !!
+        !!------------------------------------------------------------------
+        !! * Arguments
+
+      INCLUDE 'type.com'
+      INCLUDE 'para.com'
+      INCLUDE 'const.com'
+      INCLUDE 'bloc.com'
+      INCLUDE 'ice.com'
+
+      real, dimension(12) :: sw12=(/0.,0.,30.3,157.6,281.8,305.7,
+     &216.5,143.3,58.9,0.6,0.,0./)
+      real, dimension(12) :: lw12=(/165.6, 164.0, 164.0, 184.7, 240.4, 
+     &               286.6, 304.1, 297.7, 262.7, 221.3, 178.3, 173.6/)
+      real, dimension(12) :: sh12=(/18.8,12.1,11.5,4.6,-7.2,
+     &-6.2,-4.8,-6.4,-2.7,0.2,8.9,12.6/)
+      real, dimension(12) :: lh12=(/0.0,-0.3,-0.5,-1.4,-7.3,
+     &-11.2,-10.2,-10.5,-6.2,-0.3,-0.2,-0.2/)
+      real, dimension(12) :: al12=(/0.84,0.84,0.83,0.81,0.80,
+     &0.78,0.64,0.69,0.84,0.84,0.84,0.84/)
+      real, dimension(12) :: fo12=(/2.,2.,2.,2.,2.,2.,2.,2.,
+     &2.,2.,2.,2./)
+      real, dimension(12) :: pr12=(/1.,1.,1.,1.,1.,0.,0.,0.,
+     &0.,1.,1.,1./)
+      real, dimension(12) :: xmon=(/0.5,1.5,2.5,3.5,4.5,5.5,
+     &                              6.5,7.5,8.5,9.5,10.5,11.5/)
+
+      real xd
+! FD addition
+      LOGICAL ln_write_forc
+
+! FD debug      ln_write_forc = .TRUE.
+      ln_write_forc = .FALSE.
+
+! FD      WRITE(numout,*) ' * forcing_nc : '
+! FD      WRITE(numout,*) ' ~~~~~~~~~~~~~~ '
+
+      xd=mod(xjour,360.)/30.
+      call xcubic_per(xd, fsolg(1,1) ,  12, xmon, sw12, 12.)
+      call xcubic_per(xd, ratbqg(1,1),  12, xmon, lw12, 12.)
+      call xcubic_per(xd, fsbbq(1,1) ,  12, xmon, sh12, 12.)
+      call xcubic_per(xd, ffltbq(1,1),  12, xmon, lh12, 12.)
+      call xcubic_per(xd, albg(1,1)  ,  12, xmon, al12, 12.)
+      call xcubic_per(xd, oce_flx    ,  12, xmon, fo12, 12.)
+      call xcubic_per(xd, hnpbq(1,1) ,  12, xmon, pr12, 12.)
+! FD corrections
+! FD at time of first paper 1.05 factor correction on SW and LW
+      fsolg(1,1) = MAX(fsolg(1,1)*1.03,0.) ! solar radiation
+      fsolg(1,1) = ( 1. - albg(1,1) ) * fsolg(1,1) 
+      hnpbq(1,1) = MAX(hnpbq(1,1) * 0.01*0.2,0.) ! precipitation in m/day
+      oce_flx = oce_flx * 3.0 ! ocean flux
+      ratbqg(1,1) = ratbqg(1,1)*1.03 ! long wave descending heat flux
+      
+
+
+      IF ( ln_write_forc ) THEN
+         WRITE(numout,*) ' Forcing fields ... '
+         WRITE(numout,*)
+         WRITE(numout,*) ' fsol        : ', fsolg(1,1)
+         WRITE(numout,*) ' lwh         : ', ratbqg(1,1)
+         WRITE(numout,*) ' shf         : ', fsbbq(1,1)
+         WRITE(numout,*) ' lhf         : ', ffltbq(1,1)
+         WRITE(numout,*) ' oce_flx     : ', oce_flx
+         WRITE(numout,*) ' hnpbq       : ', hnpbq(1,1)
+         WRITE(numout,*) ' albg        : ', albg(1,1)
+         WRITE(numout,*)
+      ENDIF
+
+!------------------------------------------------------------------------------
+! end of forcing 
+      RETURN
+      END
+
+      subroutine xcubic_per(x, fup, na, xa, fa, xperiodic)
+      implicit none
+      integer na
+      real x, fup, fpup, fppup, xa(na), fa(na), xperiodic
+! locals
+      real capx,f00,f10,c0,c1,c2,c3,c4
+      integer i,ix,ix1,ixp1,ixm1
+      real, parameter :: pt5=0.5,one=1.0,two=2.0,six=6.0,ov6=one/six
+
+            capx = (x-xa(1))/(xa(2)-xa(1))
+            if (capx<0.0) capx=capx+xperiodic/(xa(2)-xa(1))
+            ix   = int(capx) + 1
+            capx = capx - REAL(ix-1)
+            ix1  = mod(ix,na) + 1
+
+            c3 = capx
+            c1 = one - c3
+            c0 = - ov6 * c1 * c3
+            c2 = c0 * ( two - c3 )
+            c4 = c0 * ( one + c3 )
+
+            ixp1 = ix1
+            ixm1 = mod(ix-2+na,na) + 1
+
+            f00 = ( fa(ixp1) - fa(ix) )
+     &           +( fa(ixm1) - fa(ix) )
+
+            ixp1 = mod(ix1,na) + 1
+            ixm1 = ix
+
+            f10 = ( fa(ixp1) - fa(ix1) )
+     &           +( fa(ixm1) - fa(ix1) )
+!*
+!*         final reconstruction
+            fup   = c1 * fa(ix)  + c2 * f00 + c3 * fa(ix1)  + c4 * f10
+
+      end
+

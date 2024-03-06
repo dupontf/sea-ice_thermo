@@ -5,6 +5,10 @@ c      OM, CLASS, FEEDOM, GRADP, STATIS, DIFBIN, TROMNC, UNIBIN, TRSBATH.
 c  modif : 06/02/98
  
 c--blocs common :
+
+      REAL(8) :: zero, one, epsil, cstmin, cstmax, untour, pi, radian,
+     &  yeaday, cpo, omega, rterre, unsrt, gpes, rho0, svrdrp
+     &  iyea_num
  
       common / cstfix /
      &  zero, one, epsil, cstmin, cstmax, untour, pi, radian,

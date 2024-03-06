@@ -122,8 +122,6 @@
          END DO !ji
       END DO !jk
 
-      WRITE(numout,*)
-
       RETURN
 !------------------------------------------------------------------------------      
       END SUBROUTINE ice_th_enmelt
@@ -166,7 +164,8 @@
 
       max_cons_err =  0.1
       max_surf_err =  0.001
-      l_write  = .TRUE.
+! FD debug      l_write  = .TRUE.
+      l_write = .FALSE.
 
       IF ( l_write ) THEN
          WRITE(numout,*) ' ** ice_th_con_dif : '
@@ -340,7 +339,8 @@
 
       !!---------------------------------------------------------------------
 
-      l_write  = .TRUE.
+! FD debug      l_write  = .TRUE.
+      l_write  = .FALSE.
       max_cons_err =  0.1
       max_surf_err =  0.001
 

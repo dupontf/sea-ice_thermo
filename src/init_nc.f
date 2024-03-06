@@ -21,6 +21,8 @@
 
       REAL(4)        zini(1)  ! forcing field dummy array
       REAL(4)        zzi(maxnlay), zti(maxnlay), zsi(maxnlay) ! forcing field dummy array
+      REAL(4)        zzs(maxnlay), zts(maxnlay) ! forcing dummy array for snow temperature profile
+      INTEGER        nzs, nzi
 
       REAL(8), DIMENSION (maxnlay) :: 
      &   zsh_i0              ,   !: old ice salt content (ppt.m-2)
@@ -65,15 +67,22 @@
       zn = 0.0
       CALL CF_READ1D ( filenc, 'nlay_s', 1, 1, zini )
       zn = REAL(zini(1))
+      nzs = NINT(zn)
 
-      DO layer = 1, INT(zn)
+      DO layer = 1, nzs
+         CALL CF_READ1D ( filenc, 'z_s', layer, 1, zini)
+         zzs(layer) = zini(1)
          CALL CF_READ1D ( filenc, 't_s', layer, 1, zini)
-         t_s(i,j,layer) = REAL(zini(1))
+! FD         t_s(i,j,layer) = REAL(zini(1))
+         zts(layer) = zini(1)
+! FD debug
+      write(*,*) 'zts',layer,zzs(layer),zts(layer)
       END DO
 
       zn = 0.0
       CALL CF_READ1D ( filenc, 'nlay_i', 1, 1, zini )
       zn = REAL(zini(1))
+      nzi = NINT(zn)
 
       zj_d = 0.0
       CALL CF_READ1D ( filenc, 'j_d', 1, 1, zini )
@@ -90,7 +99,7 @@
       CALL CF_READ1D ( filenc, 't_su', 1, 1, zini)
       t_su(i,j) = REAL(zini(1))
 
-      DO layer = 1, INT(zn)
+      DO layer = 1, nzi
          CALL CF_READ1D ( filenc, 'z_i', layer, 1, zini)
          zzi(layer) = zini(1)
          CALL CF_READ1D ( filenc, 't_i', layer, 1, zini)
@@ -111,6 +120,33 @@
             WRITE(numout,*) ' i = ', i, ' j = ', j
             CALL ice_phy_grid(1,1,nlay_s,ht_s(i,j), .FALSE., "sno" )   ! compute the physical grid
 
+            ntop0  = 1
+            nbot0  = nzs
+            ntop1  = 1
+            nbot1  = nlay_s
+
+            !--- Temperature
+            zm0(0) = 0.0         ! layer interfaces cotes
+            DO layer = 1, nbot0-1
+               zm0(layer) = REAL( zzs(layer) + zzs(layer+1) ) / 2.
+            END DO
+            zm0(nbot0) = ht_s(i,j)
+
+            DO layer = 1, nbot0  !layer thickness and salt content
+               zthick0(layer) = zm0(layer)-zm0(layer-1)
+               zsh_i0(layer) = zthick0(layer)*REAL(zts(layer)) !volume of snow
+            END DO
+
+            CALL ice_phy_relay( nbot0 , nbot1 , ntop0 , ntop1 , 
+     &                       zthick0, deltaz_s_phy, zsh_i0 , zsh_i1 )
+
+            DO layer = 1, nlay_s
+               t_s(i,j,layer) = zsh_i1(layer) /
+     &                                     deltaz_s_phy(layer)
+! FD debug
+      write(*,*) 't_s',layer,t_s(i,j,layer)
+            END DO
+
             !-----
             ! Ice
             !-----
@@ -118,7 +154,8 @@
 
             ! grid indexes for redistribution
             ntop0  = 1 
-            nbot0  = INT(zn)
+! FD            nbot0  = INT(zn)
+            nbot0  = nzi
             ntop1  = 1
             nbot1  = nlay_i
 

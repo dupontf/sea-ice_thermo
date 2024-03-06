@@ -2,8 +2,9 @@
 c---5----|----5----|----5----|----5----|----5----|----5----|----5----|72--5----|
 c
       include 'type.com'
-      dimension a(n),index(n)
-      dimension b(*)
+      REAL(8) :: a(n)
+      INTEGER :: index(n)
+      REAL(8) :: b(*)
 c
       do 1 ji=1,n
       a(ji)=b(index(ji))

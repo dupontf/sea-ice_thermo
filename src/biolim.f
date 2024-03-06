@@ -77,7 +77,7 @@
       mixage = MAX(MIN(lstab+lstab,2),-lstab)
 ! FD      numofday = nday1     - 1  
       numofday = INT( tpstot / 86400.d0)
-      yeaday   = 365.0
+      yeaday   = 360.0
       yrsec  = yeaday*86400.
 !
 !-----------------------------------------------------------------------
@@ -96,15 +96,14 @@
          ! Time step variables
          !---------------------
          numit = numit + 1
-         WRITE(numout,*) 
-     &   '============================================================='
-         WRITE(numout,*)
-         WRITE(numout,*) '   *** Beginning the time step *** ', numit
-         WRITE(numout,*)
-         WRITE(numout,*) 
-     &   '============================================================='
-         WRITE(numout,*)
-! FD         numofday = numofday + 1
+! FD         WRITE(numout,*) 
+! FD     &   '============================================================='
+! FD         WRITE(numout,*)
+! FD         WRITE(numout,*) '   *** Beginning the time step *** ', numit
+! FD         WRITE(numout,*)
+! FD         WRITE(numout,*) 
+! FD     &   '============================================================='
+! FD         WRITE(numout,*)
          tpstot = tpstot + dtsd2
          numofday = INT( tpstot / 86400.d0 )
          ! The date corresponds to the middle of the time step.
@@ -116,10 +115,6 @@
          ! and number of the year
          IF (numofday.eq.int(yeaday+1)) THEN
             nyear1   = nyear1   + 1
-            yeaday = 365.0
-            IF (mod(nyear1  ,4).eq.0) THEN
-               yeaday = 366.0
-            ENDIF
             yrsec  = yeaday*86400.
             numofday = 1
          ENDIF
@@ -149,13 +144,13 @@
          !---------
          ! Forcing
          !---------
-         CALL forcing_nc(xjour)
+         CALL forcing_semtner(xjour)
 
          !--------------------
          ! Ice thermodynamics
          !--------------------
-         WRITE(numout,*) ' n_i :', n_i
-         WRITE(numout,*) ' n_s :', n_s
+! FD         WRITE(numout,*) ' n_i :', n_i
+! FD         WRITE(numout,*) ' n_s :', n_s
          CALL ice_th(ntrmax,n_i,n_s,numofday)
  
  300  CONTINUE ! End of the loop
