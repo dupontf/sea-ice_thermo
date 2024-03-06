@@ -656,42 +656,41 @@ endif
 
       IF (bbc .EQ. 'fixT') THEN
          BT1(0)	= 1d0
-         DT0(0)	= tocn
+         DT0(0)	= tocn - tiold(0)
       ELSE
          k0 = kki(0)
          BT1(0) =   k0
          CT1(0) = - k0
-         DT0(0) = Fbase
+         DT0(0) = Fbase + k0 * ( tiold(1) - tiold(0) )
       ENDIF
 
       DO j=1,ni
-         k0 = dtice * kki(j-1)
-         k1 = dtice * kki(j  )
          k0 = kki(j-1)
          k1 = kki(j  )
          AT1(j) = -k0
          BT1(j) =  k0 + k1 + rhoice*cp(j)*henew(j) / dtice
          CT1(j) = -k1
-         DT0(j) =  R(j)+(   rhoice*cp(j)*tiold(j)*henew(j) &
-                          - rhoice*em(j)*(henew(j)-heold(j)))/dtice  ! metric term to close the energy conservation
+         DT0(j) =  R(j)+( - rhoice*em(j)*(henew(j)-heold(j)))/dtice & ! metric term to close the energy conservation
+                        + k0 * ( tiold(j-1) - tiold(j) ) &
+                        + k1 * ( tiold(j+1) - tiold(j) )
 
 ! lower transport
          if (j==1) then
             AT1(j) = AT1(j) - rhoice*w(j-1) * cp(j-1)
-            DT0(j) = DT0(j) + rhoice*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1))
+            DT0(j) = DT0(j) + rhoice*w(j-1) * em(j-1)
          else
 if (.not.adv_upwind) then
             AT1(j) = AT1(j) - rhoice*w(j-1) * cp(j-1) * 0.5d0
-            DT0(j) = DT0(j) + rhoice*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1)) * 0.5d0
+            DT0(j) = DT0(j) + rhoice*w(j-1) * em(j-1) * 0.5d0
             BT1(j) = BT1(j) - rhoice*w(j-1) * cp(j  ) * 0.5d0
-            DT0(j) = DT0(j) + rhoice*w(j-1) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+            DT0(j) = DT0(j) + rhoice*w(j-1) * em(j  ) * 0.5d0
 else
   if (w(j-1)>0.d0) then
             AT1(j) = AT1(j) - rhoice*w(j-1) * cp(j-1)
-            DT0(j) = DT0(j) + rhoice*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1))
+            DT0(j) = DT0(j) + rhoice*w(j-1) * em(j-1)
   else
             BT1(j) = BT1(j) - rhoice*w(j-1) * cp(j  )
-            DT0(j) = DT0(j) + rhoice*w(j-1) *(em(j  )-cp(j  )*tiold(j  ))
+            DT0(j) = DT0(j) + rhoice*w(j-1) * em(j  )
   endif
 endif
          endif
@@ -700,68 +699,67 @@ endif
          if (j<ni) then
 if (.not.adv_upwind) then
             BT1(j) = BT1(j) + rhoice*w(j  ) * cp(j  ) * 0.5d0
-            DT0(j) = DT0(j) - rhoice*w(j  ) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+            DT0(j) = DT0(j) - rhoice*w(j  ) * em(j  ) * 0.5d0
             CT1(j) = CT1(j) + rhoice*w(j  ) * cp(j+1) * 0.5d0
-            DT0(j) = DT0(j) - rhoice*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1)) * 0.5d0
+            DT0(j) = DT0(j) - rhoice*w(j  ) * em(j+1) * 0.5d0
 else
   if (w(j  )>0.d0) then
             BT1(j) = BT1(j) + rhoice*w(j  ) * cp(j  )
-            DT0(j) = DT0(j) - rhoice*w(j  ) *(em(j  )-cp(j  )*tiold(j  ))
+            DT0(j) = DT0(j) - rhoice*w(j  ) * em(j  )
   else
             CT1(j) = CT1(j) + rhoice*w(j  ) * cp(j+1)
-            DT0(j) = DT0(j) - rhoice*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1))
+            DT0(j) = DT0(j) - rhoice*w(j  ) * em(j+1)
   endif
 endif
          else ! no choice but to use an upwind formulation during ice surface melt (em=0 at surface)
             BT1(j) = BT1(j) + rhoice*w(j  ) * cp(j  )
-            DT0(j) = DT0(j) - rhoice*w(j  ) *(em(j  )-cp(j  )*tiold(j  ))
+            DT0(j) = DT0(j) - rhoice*w(j  ) * em(j  )
          endif
       ENDDO
 
      if ( .not.thin_snow_active ) then
 
       DO j=ni+1,ns
-        k0 = dtice * kks(j-1)
-        k1 = dtice * kks(j)
         k0 = kks(j-1)
         k1 = kks(j)
             AT1(j) = -k0
             BT1(j) =  k0 + k1 + rhosno*cp(j)*henew(j) / dtice
             CT1(j) = -k1
-            DT0(j) =  R(j)  + (rhosno*cp(j)*tiold(j)*henew(j) &
-                             - rhosno*em(j)*(henew(j)-heold(j)))/dtice
+            DT0(j) =  R(j) + (- rhosno*em(j)*(henew(j)-heold(j)))/dtice &
+                        + k0 * ( tiold(j-1) - tiold(j) ) &
+                        + k1 * ( tiold(j+1) - tiold(j) )
 
 if (.not.adv_upwind) then
 ! FD actually the ice-snow interface velocity is always zero (no special treatment for j=ni+1)
             AT1(j) = AT1(j) - rhosno*w(j-1) * cp(j-1) * 0.5d0
-            DT0(j) = DT0(j) + rhosno*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1)) * 0.5d0
+            DT0(j) = DT0(j) + rhosno*w(j-1) * em(j-1) * 0.5d0
             BT1(j) = BT1(j) - rhosno*w(j-1) * cp(j  ) * 0.5d0
-            DT0(j) = DT0(j) + rhosno*w(j-1) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+            DT0(j) = DT0(j) + rhosno*w(j-1) * em(j  ) * 0.5d0
 else
   if (w(j-1)>0.d0) then
             AT1(j) = AT1(j) - rhosno*w(j-1) * cp(j-1)
-            DT0(j) = DT0(j) + rhosno*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1))
+            DT0(j) = DT0(j) + rhosno*w(j-1) * em(j-1)
   else
             BT1(j) = BT1(j) - rhosno*w(j-1) * cp(j  )
-            DT0(j) = DT0(j) + rhosno*w(j-1) *(em(j  )-cp(j  )*tiold(j  ))
+            DT0(j) = DT0(j) + rhosno*w(j-1) * em(j  )
   endif
 endif
         if (j==ns) then
             CT1(j) = CT1(j) + rhosno*w(j  ) * cp(j+1)
-            DT0(j) = DT0(j) - rhosno*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1))
+            DT0(j) = DT0(j) - rhosno*w(j  ) * em(j+1)
         else
 if (.not.adv_upwind) then
             BT1(j) = BT1(j) + rhosno*w(j  ) * cp(j  ) * 0.5d0
-            DT0(j) = DT0(j) - rhosno*w(j  ) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+            DT0(j) = DT0(j) - rhosno*w(j  ) * em(j  ) * 0.5d0
             CT1(j) = CT1(j) + rhosno*w(j  ) * cp(j+1) * 0.5d0
-            DT0(j) = DT0(j) - rhosno*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1)) * 0.5d0
+            DT0(j) = DT0(j) - rhosno*w(j  ) * em(j+1) * 0.5d0
 else
   if (w(j  )>0.d0) then
             BT1(j) = BT1(j) + rhosno*w(j  ) * cp(j  )
-            DT0(j) = DT0(j) - rhosno*w(j  ) *(em(j  )-cp(j  )*tiold(j  ))
+            DT0(j) = DT0(j) - rhosno*w(j  ) * em(j  )
   else
             CT1(j) = CT1(j) + rhosno*w(j  ) * cp(j+1)
-            DT0(j) = DT0(j) - rhosno*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1))
+            DT0(j) = DT0(j) - rhosno*w(j  ) * em(j+1)
   endif
 endif
         endif
@@ -770,16 +768,16 @@ endif
        k1 = kks(ns)
        AT1(ns+1)	= - k1
        BT1(ns+1)	=   k1 + dzf
-       DT0(ns+1)	=   Fnet0 + dzf*tiold(ns+1)
+       DT0(ns+1)	=   Fnet0 + k1 * ( tiold(ns) - tiold(ns+1) )
 
       IF (sbc .EQ. 'flux' .AND. Tsbc) THEN
        AT1(ns+1)	= 0d0
        BT1(ns+1)	= 1d0
-       DT0(ns+1)	= Tf(ns+1)
+       DT0(ns+1)	= Tf(ns+1) - tiold(ns+1)
       ELSEIF (sbc .EQ. 'fixT') THEN
        AT1(ns+1)	= 0d0
        BT1(ns+1)	= 1d0
-       DT0(ns+1)	= Tsurf
+       DT0(ns+1)	= Tsurf - tiold(ns+1)
       ENDIF
 
 ! FD no snow
@@ -788,16 +786,16 @@ endif
        k1 = kki(ni)
          AT1(ni+1) = - k1
          BT1(ni+1) =   k1 + dzf
-         DT0(ni+1) =  Fnet0 + dzf*tiold(ns+1)
+         DT0(ni+1) =  Fnet0 + k1 * ( tiold(ni) - tiold(ni+1) )
 
       IF (sbc .EQ. 'flux' .AND. Tsbc) THEN
         AT1(ni+1)	= 0d0
         BT1(ni+1)	= 1d0
-        DT0(ni+1)	= Tf(ns+1)
+        DT0(ni+1)	= Tf(ni+1) - tiold(ni+1)
       ELSEIF (sbc .EQ. 'fixT') THEN
         AT1(ni+1)	= 0d0
         BT1(ni+1)	= 1d0
-        DT0(ni+1)	= Tsurf
+        DT0(ni+1)	= Tsurf - tiold(ni+1)
       ENDIF
      endif ! condition on hs_b
 
@@ -862,7 +860,7 @@ endif
 
 ! ice column increment to temperature
       DO j=0,ni
-         temp(j,1) = tout(j)
+         temp(j,1) = tiold(j) + tout(j)
       ENDDO
 
 !treatment of snow
@@ -870,12 +868,12 @@ endif
 
 ! snow column increment to temperature
       DO j=ni+1,ns+1
-         temp(j,1) = tout(j)
+         temp(j,1) = tiold(j) + tout(j)
       ENDDO
 
      else ! thin ice case
 
-      temp(ni+1,1) = tout(ni+1)
+      temp(ni+1,1) = tiold(ni+1) + tout(ni+1)
 ! in any case, the temperature of snow is overwritten by that of ice
       temp(ni+2:ns+1,1) = temp(ni+1,1)
      endif
