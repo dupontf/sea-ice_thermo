@@ -570,7 +570,7 @@ endif
 
          IF (temp(ns+1,1)+tiny .GE. Tf(ns+1) .AND. -Fnet-Fcis .LT. 0d0) THEN
             Tsbc = .true.
-            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ni+1),0d0)
+            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ni),0d0)
          ENDIF
       endif
 
@@ -617,7 +617,7 @@ if (extra_debug) write(*,*) 'switch to thin_snow_active',hs_b(1),fthin_snow
       Fcis = -kki(ni) * ( temp(ns+1,1) - temp(ni  ,1))
          IF (temp(ns+1,1)+tiny .GE. Tf(ns+1) .AND. -Fnet-Fcis .LT. 0d0) THEN
             Tsbc = .true.
-            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ns+1),0d0)
+            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ni),0d0)
          ENDIF
       dhidt	= disdt - dibdt ! original
 
@@ -737,9 +737,12 @@ write(*,*) 'mass',ni,dt0(ni)
        DT0(j)      =   Fnet + Fcis
 
       IF (Tsbc) THEN
-         DT0(j)      = - w(ni) * rhoice * qm(ni+1) + Fnet + Fcis ! line 0 is for w(0)
-         matj(j  ,j) = rhoice * qm(ni+1)                         ! w increment
-         matj(j-1,j) = - k0                                      ! dFcis/dT increment
+         DT0(j)      = - w(ni) * rhoice * qm(ni) + Fnet + Fcis ! line 0 is for w(0)
+         matj(j  ,j) = rhoice * qm(ni)                         ! w increment
+         matj(j-1,j) = - k0                                    ! dFcis/dT increment
+!         matj(j-1,j) = - k0 + w(ni) * rhoice * cp(j-1)         ! dFcis/dT increment + variation due to top cell temp variation
+! FD debug
+write(*,*) 'em top',em(ni),qm(ni),cp(ni),cp(j-1)
       ENDIF
      endif ! condition on hs_b
 
@@ -828,7 +831,7 @@ write(*,*) 'adv down',ni,dt0(ni)
 ! surface treatment assuming melting, looks like an upwind formulation (em=cp_ice*Tf at surface)
 ! if no melting w=0 anyway
          j=ni
-            DT0(j)      = DT0(j)      - rhoice * w(j  ) * em(j+1)
+            DT0(j)      = DT0(j)      - rhoice * w(j  ) * em(j)
 ! FD debug
 write(*,*) 'adv up',j,dt0(j),w(j)
 
@@ -857,7 +860,7 @@ write(*,*) 'adv up',j,dt0(j),w(j)
          endif
          j=ni ! upper transport in ice+snow is zero, therefore it only remains case of thin_snow and top melt
            if ( Tsbc .and. thin_snow_active ) then
-            matj(ni+1,j) = matj(ni+1,j) + rhoice * em(j+1) *      zi(j  )
+            matj(ni+1,j) = matj(ni+1,j) + rhoice * em(j) *      zi(j  )
            endif
 
 
