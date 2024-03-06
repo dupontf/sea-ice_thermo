@@ -243,6 +243,13 @@ subroutine ice_thermo(dtice)
 ! extra_debug=.true.
 
 !------------------------------------------------------------------------
+!     condition on ice thickness
+!     no thermo below 5 cm
+!------------------------------------------------------------------------
+
+      if (hi.lt.5d-2) return
+
+!------------------------------------------------------------------------
 !     Some logical constants
 !------------------------------------------------------------------------
 
@@ -333,16 +340,9 @@ subroutine ice_thermo(dtice)
       do j=1,nlice
         sali(j,0)=si(nlice-j+1)
       enddo
-      DO j=ni+1,ns
+      DO j=ni+1,ns+1
          sali(j,0) = 0d0
       ENDDO
-
-      sali(:,1)=sali(:,0) ! FD not sure what is really done in this code, just for debug
-      IF (hs_b(0) > hslim) THEN
-        sali(ns+1,0)=0.d0
-      else
-        sali(ns+1,0)=sali(ni,0)
-      ENDIF
 
       hsold = hs
       tsuold = tsu
@@ -469,35 +469,23 @@ subroutine ice_thermo(dtice)
 ! need to get rid of snow if too thin during melting/sublimating
 ! thin snow case
 !---------------------------------------------------------------------
-  if ( hs_b(0) <= hslim .and. hs_b(0) >= 1d-12 ) then
+  if ( hs_b(0) <= hslim ) then
 
-! then 1- compute total energy in snow
-!      2- if Fnet>0, we assume that we can use some of the heat flux to melt the thin snow
-!      3- if Fnet<=0,we assume that some of the sublimation can be used to sublimate the snow
-
-    sume2 = 0.d0
+    fthin_snow = 0.d0
+    DO j=ni+1,ns
+       Elay = em(j)*rhosno*heold(j)
+       fthin_snow = fthin_snow + Elay
+    ENDDO
+    fthin_snow = - fthin_snow / dtice
     do j=ni+1,ns
-      sume2 = sume2 + em(j) * rhosno * heold(j)
+      heold(j)=0.d0
     enddo
-    em_thin_snow = sume2 / rhosno / hsold
-
-    if ( Fnet > 0.d0 .and. temp(ns+1,0)+tiny.gt.tf(ns+1) ) then ! use Fnet if positive
-
-      energy_snow_melt = min( - sume2, Fnet * dtice )! energy (negative) required to melt the thin snow (in entirity if Fnet large enough)
-      dhs =  - energy_snow_melt / sume2 * hs_b(0) ! melted snow thickness
-      fwf = fwf + dhs / dtice / rhowat * rhosno
-      fthin_snow = energy_snow_melt / dtice
-      snow_precip = 0.d0
-      dspdt = - dhs / dtice
-
-    endif
-
-    thin_snow_active = .true.
-
-  else if (hs_b(0)<1d-12) then ! just flag, no other adjustment needed
-
-    thin_snow_active = .true.
-    em_thin_snow = em(ni+1)
+    hs_b(0)=0.d0
+    thin_snow_active=.true.
+    tiold(ni+1:ns) = tiold(ns+1)
+    em_thin_snow = func_el(Tf(ns+1),tiold(ns+1))
+    Tf(ns+1) = Tf(ni)
+    sali(ns+1,0) = sali(ni,0)
 
 !---------------------------------------------------------------------
   endif ! end thin snow
@@ -571,7 +559,7 @@ subroutine ice_thermo(dtice)
          IF (temp(ns+1,1)+tiny .GE. Tf(ns+1) .AND. -Fnet-Fcis .LT. 0d0) THEN
            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ni),0d0)
          ENDIF
-         IF (counter>10.and.w(ni)>1e-7) THEN ! case of a severe limit cycle reached
+         IF (counter>10.and.w(ni)>1e-9) THEN ! case of a severe limit cycle reached
            disdt = 0.5d0 * ( disdt - w(ni) ) ! apply a relaxation scheme
          ENDIF
       endif
@@ -606,8 +594,8 @@ subroutine ice_thermo(dtice)
       Fnet0 = Fnet0 - fthin_snow
       Fnet = Fnet - fthin_snow
       kki(ni) = ki(ni) / (hi_b(0) * dzzi(ni))
-      tf(ns+1)=tf(ni)
-      sali(ns+1,:)=sali(ni,:)
+      Tf(ns+1) = Tf(ni)
+      sali(ns+1,0) = sali(ni,0)
    endif
 
       hi_b(1)	= hi_b(0) + dhidt*dtice
@@ -834,6 +822,14 @@ if (extra_debug) then
 ! write(*,'(I6,300(f8.3,1x))') counter, temp(0:ns+1,0)
 ! stop
 endif
+! FD debug
+if (extra_debug) then
+ if ( .not.thin_snow_active ) then
+  write(*,*) 'SBCond snow',Tsbc,Fnet,Fcss
+ else
+  write(*,*) 'SBCond ice',Tsbc,Fnet,Fcis,kki(ni), temp(ns+1,1), temp(ni,1)
+endif
+endif
 
      if ( .not.thin_snow_active ) then
       IF (( temp(ns+1,1)+tiny .GE. Tf(ns+1)) .AND. (Tsbc .EQV. .FALSE.)) THEN
@@ -853,20 +849,13 @@ endif
       ENDIF
      endif
 
-! FD debug
-if (extra_debug) then
- if ( .not.thin_snow_active ) then
-  write(*,*) 'SBCond snow',Tsbc,Fnet,Fcss
- else
-  write(*,*) 'SBCond ice',Tsbc,Fnet,Fcis
-endif
-endif
-
 !-----------------------------------------------------------------------
 !     Update T-S dependent ice parameters
 !     Lf, cp are diagnostics for output
 !-----------------------------------------------------------------------
       
+      sali(0:ns+1,1)=sali(0:ns+1,0) ! FD not sure what is really done in this code, just for debug
+
       DO j=0,ni+1
          ki(j)   = func_ki(sali(j,1),temp(j,1))
       ENDDO
