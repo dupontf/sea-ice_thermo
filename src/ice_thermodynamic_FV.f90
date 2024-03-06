@@ -394,7 +394,7 @@ subroutine ice_thermo(dtice)
             ki(j)   = func_ki(sali(j,0),tiold(j))
             qm(j)   = func_qm(Tf(j),tiold(j))
             em(j)   = func_el(Tf(j),tiold(j))
-            cp(j)   = func_cp(Tf(j),temp(j,1),tiold(j))
+            cp(j)   = func_cph(Tf(j),tiold(j))
       ENDDO
       em0(0:ns+1) = em(0:ns+1)
 
@@ -964,7 +964,7 @@ endif
       DO j=0,ns+1
          Tf(j)   = Tfreeze1(sali(j,1))
          qm(j)   = func_qm(Tf(j),temp(j,1))
-         cp(j)   = func_cp(Tf(j),temp(j,1),tiold(j))
+         cp(j)   = func_cph(Tf(j),temp(j,1))
          em(j)   = func_el(Tf(j),temp(j,1))
       ENDDO
 
