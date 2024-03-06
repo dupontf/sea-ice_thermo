@@ -56,7 +56,9 @@ extra=-fdefault-real-8
 # checks stuff but not everything without changing the results
 #fast=-align all -convert big_endian -C
 
-CPPFLAGS=-DTHERMO_FE
+CPPFLAGS=-DTHERMO_LIM
+CPPFLAGS=-DTHERMO_FV
+#CPPFLAGS=-DTHERMO_FE
 
 #---+----1----+----2----+----3----+----4----+----5----+----6----+----7-|--+----|
 
