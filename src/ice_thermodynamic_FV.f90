@@ -161,7 +161,7 @@ subroutine ice_thermo(dtice)
       DOUBLE PRECISION :: &
      dhidt,&! total rate of change of ice  thickness	[m/s]
      dhsdt,&! total rate of change of snow thickness	[m/s]
-     dspdt,&! rate of change of snow thickn. due to precip. [m/s]
+     dspdt,&! rate of change of snow thickn. due thin_snow_melting [m/s]
      dssdt,&! rate of change of snow thickn. at the surface [m/s]
      dsbdt,&! rate of change of snow thickn. @ the sno base [m/s]
      disdt,&! rate of change of ice  thickn. at the surface [m/s]
@@ -228,9 +228,17 @@ subroutine ice_thermo(dtice)
   logical :: debug=.false.
   logical :: extra_debug=.false.
   double precision :: hsold, tsuold, sfallold
+  logical :: thin_snow_active
+  double precision :: snow_precip, rain_precip, fwf, &
+                      fthin_snow, energy_snow_melt, sume2, em_thin_snow
+! parameters for ice thermodynamics and heat fluxes
+  double precision,save :: tzero  = 273.15d0       ! tzero C => K
+
+  double precision,save :: latvap = 2.5d6          ! J/kg latent heat of vaporization
+  double precision,save :: latsub = 2.834d6        ! J/kg latent heat of sublimation
 ! FD debug
  debug=.true.
-! extra_debug=.true.
+ extra_debug=.true.
 
 !------------------------------------------------------------------------
 !     Some logical constants
@@ -238,8 +246,6 @@ subroutine ice_thermo(dtice)
 
       salinity  = 'no'          ! = no dynamic salinity
       bbc       = 'fixT'        ! bottom boundqry condition
-! FD debug
-!      bbc       = 'flux'        ! bottom boundqry condition
       sbc       = 'flux'        ! surface boundqry condition
 
 !------------------------------------------------------------------------
@@ -274,14 +280,12 @@ subroutine ice_thermo(dtice)
 !     Some constants for the numerics
 !------------------------------------------------------------------------
 
-      Tdiff	=   1.000d-8	! temperature tolerance in Euler step	[C]
       tiny	=   1.000d-9	! very small number			[-]
 
-      hicut	=   0.010d+0	! minimum ice  thickness		[m]
-      hslim	=   0.005d+0	! minimum snow thickness		[m]
-! FD debug
-hslim=0.0005d0
-Tdiff=1d-12
+      hslim     =   0.0005d0    ! limit for computing temperature in snow
+      Tdiff     =   1.000d-12   ! temperature tolerance in Euler step	[C]
+      thin_snow_active =.false. ! reroute some energy to sublimate/melt snow if true
+      fwf = 0.d0
 
 !---------------------------------------------------------------------
 ! other quantities
@@ -331,6 +335,8 @@ Tdiff=1d-12
       hsold = hs
       tsuold = tsu
       sfallold = snowfall
+      fthin_snow = 0.d0
+      dspdt = 0.d0
 
 1000 continue
 !------------------------------------------------------------------------
@@ -400,12 +406,10 @@ Tdiff=1d-12
          Ein0 = Ein0+Elay
       ENDDO
 
-     IF (hs_b(0)>hslim) then
       DO j=ni+1,ns-1
          Elay = em(j)*rhosno*heold(j)
          Ein0 = Ein0+Elay
       ENDDO
-     ENDIF
 
       dEin = 0d0				! diff intl E [J/m2]
 
@@ -438,11 +442,66 @@ Tdiff=1d-12
       Fnet0 =  fac_transmi * swrad + netlw + fsens + flat
       Fnet  = Fnet0
 
+!---------------------------------------------------------------------
+! accumulation at the surface
+!---------------------------------------------------------------------
+     if ( tair < tzero ) then
+      snow_precip = snowfall
+      rain_precip = 0.d0
+     else
+      snow_precip = 0.d0
+      rain_precip = snowfall * rhosno / rhowat
+     endif
+
+!---------------------------------------------------------------------
+! need to get rid of snow if too thin during melting/sublimating
+! thin snow case
+!---------------------------------------------------------------------
+  if ( hs_b(0) <= hslim .and. hs_b(0) >= 1d-12 ) then
+
+! then 1- compute total energy in snow
+!      2- if Fnet>0, we assume that we can use some of the heat flux to melt the thin snow
+!      3- if Fnet<=0,we assume that some of the sublimation can be used to sublimate the snow
+
+    sume2 = 0.d0
+    do j=ni+1,ns-1
+      sume2 = sume2 + em(j) * rhosno * heold(j)
+    enddo
+    em_thin_snow = sume2 / rhosno / hsold
+
+    if ( Fnet > 0.d0 ) then ! use Fnet if positive
+
+      energy_snow_melt = min( - sume2, Fnet * dtice )! energy (negative) required to melt the thin snow (in entirity if Fnet large enough)
+      dhs =  - energy_snow_melt / sume2 * hs_b(0) ! melted snow thickness
+      fwf = fwf + dhs / dtice / rhowat * rhosno
+      fthin_snow = energy_snow_melt / dtice
+      snow_precip = 0.d0
+      dspdt = - dhs / dtice
+
+    endif
+
+    thin_snow_active = .true.
+
+  else if (hs_b(0)<1d-12) then
+
+    em_thin_snow = em(ns)
+    temp(ni+1:ns,0) = temp(ns,0)
+    temp(ni+1:ns,1) = temp(ns,0)
+    em(ni+1:ns) = em(ns)
+    thin_snow_active = .true.
+
+!---------------------------------------------------------------------
+  endif ! end thin snow
+!---------------------------------------------------------------------
+
+      Fnet0 = Fnet0 - fthin_snow
+      Fnet = Fnet - fthin_snow
+
 !------------------------------------------------------------------------
 !     Update conductive heat fluxes
 !------------------------------------------------------------------------
 
-     IF (hs_b(0) .GT. hslim) THEN
+      IF ( .not.thin_snow_active ) THEN
          Fcss = -kks(ns-1) * ( temp(ns  ,1) - temp(ns-1,1) )
          Fcsb = -kks(ni  ) * ( temp(ni+1,1) - temp(ni  ,1) )
       ELSE
@@ -451,7 +510,7 @@ Tdiff=1d-12
       ENDIF
       
       Fcis = -kki(ni) * ( temp(ni,1) - temp(ni-1,1))
-      Fcib = -kki(1 ) * ( temp( 1,1) - temp(   0,0))
+      Fcib = -kki(1 ) * ( temp( 1,1) - temp(   0,1))
 
 !-----------------------------------------------------------------------
 !     ICE/SNOW case
@@ -462,109 +521,100 @@ Tdiff=1d-12
       counter = 0
 
 !-----------------------------------------------------------------------
+!     Update snow and ice thickness
+!-----------------------------------------------------------------------
+
+      dssdt = snow_precip + dspdt
+      dsbdt = 0d0		! melt of snow base not allowed
+      disdt = 0d0
+      dibdt = ( Fcib - oceflx) / ( rhoice * em(0) )
+      dibdt = 0.d0
+
+
+!-----------------------------------------------------------------------
 !     Euler loop
 !-----------------------------------------------------------------------
 
 4000  CONTINUE
 
-      Fmlt = Fnet-Fcis
-
 !-----------------------------------------------------------------------
-!     Update atm and ocn heat fluxes
+!     Update energy flux due to snow precipitation
 !-----------------------------------------------------------------------
       
-     if ( hs_b(0) > hslim ) then
-            Fprec = -snowfall*rhosno*qm(ns)
-     else
-            Fprec = 0.d0
-     endif
-            Frain = 0d0
 
-     if ( hs_b(0) > hslim ) then
-            Fnet = Fnet0 - dzf * (temp(ns,1)-tiold(ns))
-     else ! FD no snow
-            Fnet = Fnet0 - dzf * (temp(ni,1)-tiold(ni))
-     endif
+      if ( .not.thin_snow_active ) then
+          Fnet = Fnet0 - dzf * (temp(ns,1)-tiold(ns))
+          Fprec = -snow_precip*rhosno*qm(ns)
+      else ! FD no snow
+          Fnet = Fnet0 - dzf * (temp(ni,1)-tiold(ni))
+          Fprec = snow_precip * rhosno * em_thin_snow
+      endif
+
+!-----------------------------------------------------------------------
+!     Update atm
+!-----------------------------------------------------------------------
+      
 ! FD debug
 if (extra_debug) then
 write(*,*) 'Fnet',Fnet, Fnet0, - dzf * (temp(ni,1)-tiold(ni))
 endif
 
-      IF (hs_b(0) > hslim) THEN
+      fwf = fwf + rain_precip ! add liquid precipitation to the freshwater flux to ocean
+      IF ( .not.thin_snow_active ) THEN
         tsu = min(tsu,tf(ns)+temp0)
       ELSE
         tsu = min(tsu,tf(ni)+temp0)
       ENDIF
 
-! FD         oceflx= rhoo*cpo*Coi*ABS(uio)*(tocn-temp(0,1))
-!-----------------------------------------------------------------------
-!     Update snow and ice thickness
-!-----------------------------------------------------------------------
-
-      dssdt = 0d0
-      disdt = 0d0
-
-      dsbdt = 0d0		! melt of snow base not allowed
-         ! snow depth evolution due to precipitation
-
-      dssdt = snowfall
-
 ! FD: if snow present
-      if (hs_b(0) > hslim) then
+      if ( .not.thin_snow_active ) then
          ! snow depth evolution due to melt superposed on precip
 
-         IF (temp(ns,1)+tiny .GE. Tf(ns) .AND. -Fnet-Fcss .LT. 0d0) THEN
-! FD            dssdt = dssdt+MIN((-Fnet-Fcss)/rhosno/qm(ns-1),0d0)
+         IF (temp(ns,1)+tiny .GE. Tf(ns) .AND. dssdt < 0d0) THEN
 ! FD the code cannot deal with concomittent snow accumulation and melt
-            dssdt = MIN((-Fnet-Fcss)/rhosno/qm(ns-1),0d0)
-            snowfall =0.d0
+            snow_precip = 0.d0
          ENDIF
-! FD debug
-if (extra_debug) then
-write(*,*) 'snow surfacae melt if <0',dssdt,temp(ns,1)+tiny .GE. Tf(ns),Fnet,Fcss
-endif
       else
 
       ! update ice surface
 
-         IF (temp(ni,1)+tiny .GE. Tf(ni) .AND. -Fnet-Fcis .LT. 0d0) THEN
-           disdt = MIN((-Fnet-Fcis)/rhoice/qm(ni-1),0d0)
-         ENDIF
          IF (counter>10.and.w(ni)>1e-7) THEN ! case of a severe limit cycle reached
            disdt = 0.5d0 * ( disdt - w(ni) ) ! apply a relaxation scheme
          ENDIF
-! FD debug
-if (extra_debug) then
-write(*,*) 'ice surfacae melt if <0',disdt,temp(ni,1)+tiny .GE. Tf(ni),Fnet,Fcis
-endif
       endif
-
-      IF (oceflx-Fcib .LT. 0d0) THEN		! for ice growth: new-ice salin.
-         qm(0) = func_qm(Tf(0),temp(0,1))
-         energy_bot = qm(0)
-      ELSEIF (oceflx-Fcib .GT. 0d0) THEN	! qm_mean_first_layer for melt
-         energy_bot = qm(1)
-      ENDIF
-! FD generalized bottom
-         dibdt	= (oceflx-Fcib) / rhoice / energy_bot
 
       dhsdt	= dssdt - dsbdt
       dhidt	= disdt - dibdt ! original
 
       hs_b(1)	= hs_b(0) + dhsdt*dtice
 
-! FD need to do something when hs reaches the limit
-      if ( hs_b(1) < hslim .and. hs_b(0) > hslim) then
-         hs=0.d0
-         goto 1000
-      endif
+!---------------------------------------------------------------------
+! need to get rid of snow if wmesh too large
+!---------------------------------------------------------------------
+
+   if ( hs_b(1) < 0.d0 .and. .not.thin_snow_active ) then
+      sume2 = 0.d0
+      do j=ni+1,ns-1
+        sume2 = sume2 + em(j) * rhosno * heold(j)
+      enddo
+      energy_snow_melt = -sume2
+      fthin_snow = energy_snow_melt / dtice
+      fwf = fwf + hs_b(0) / dtice / rhowat * rhosno
+      Tsbc = .false.
+      thin_snow_active = .true.
+      tsu = ti(ni)
+      snow_precip = 0.d0
+      hs_b(1) = 0.d0
+      dspdt = -hs_b(0) /dtice
+      dssdt = dspdt
+      Fnet0 = Fnet0 - fthin_snow
+      Fnet = Fnet - fthin_snow
+   endif
 
       hi_b(1)	= hi_b(0) + dhidt*dtice
 
       henew(1:ni-1)=dzi(1:ni-1)*hi_b(1)
       henew(ni+1:ns-1)=dzi(ni+1:ns-1)*hs_b(1)
-
-! FD      fwf = fwf0 + ( dhsdt*rhos + dhidt*rhoi ) / rhoo
 
 ! FD only relevant when salinity varies during the integration
 ! FD case of solving for varying salinity
@@ -579,11 +629,9 @@ endif
       DO j=1,ni
          w(j)	= -zi(j)*disdt-(1d0-zi(j))*dibdt
       ENDDO
-     if (hs_b(0) > hslim ) then
       DO j=ni+1,ns-1
          w(j)	= -(zi(j)-1.d0)*dssdt-(2d0-zi(j))*dsbdt
       ENDDO
-     endif
 
 !-----------------------------------------------------------------------
 !     Define constant coefficients
@@ -591,19 +639,15 @@ endif
 
       C2i	= dtice*rhoice
       C3i	= dtice
-
-!     if (hs_b(0) > hscut ) then
-     if (hs_b(0) > hslim ) then
       C2s	= dtice*rhosno
       C3s	= dtice
-     endif
 
 !-----------------------------------------------------------------------
 !     Absorbed SW radiation energy per unit volume (R)       
 !     1/dz Int_z^z+dz R dz = Rtrans(z+dz) - Rtrans(z)
 !-----------------------------------------------------------------------
 
-      if (hs_b(1) > hslim ) then
+      if ( .not.thin_snow_active ) then
         DO j=ns-1,ni+1,-1
           R(j)   = swradab_s(ns-j)
         ENDDO
@@ -624,19 +668,29 @@ endif
 
          AT1=0.d0; BT1=0.d0; CT1=0.d0; DT0=0.d0;
 
-
-      IF (bbc .EQ. 'fixT') THEN
-         BT1(0)	= 1d0
-         CT1(0)	= 0d0
-         DT0(0)	= tocn
-      ELSE
+! bottom BC: k dT/dz - rho w E = F (or - rho E w 
          k0 = kki(1)
-         BT1(0) =   k0
-         CT1(0) = - k0
-         DT0(0) = Fbase
-      ENDIF
+         BT1(0) = - rhoice * em (0) ! -> unknown is velocity (dibdt = - w)
+         CT1(0) =   k0
+         DT0(0) =   k0 * temp(0,1) - oceflx
 
-      DO j=1,ni-1
+      ! first prognostic layer
+      j=1
+         k0 = dtice * kki(j  )
+         k1 = dtice * kki(j+1)
+         AT1(j) =  0.d0 ! fixed temperature at bottom BC
+         BT1(j) =  k1 + rhoice*cp(j)*henew(j)
+         CT1(j) = -k1
+         DT0(j) =  C3i*R(j)+rhoice*cp(j)*tiold(j)*henew(j) &
+                          - rhoice*em(j)*(henew(j)-heold(j)) & ! metric term to close the energy conservation
+                 + dtice * oceflx
+
+            BT1(j) = BT1(j) + C2i*w(j+1) * cp(j  ) * 0.5d0
+            DT0(j) = DT0(j) - C2i*w(j+1) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+            CT1(j) = CT1(j) + C2i*w(j+1) * cp(j+1) * 0.5d0
+            DT0(j) = DT0(j) - C2i*w(j+1) *(em(j+1)-cp(j+1)*tiold(j+1)) * 0.5d0
+
+      DO j=2,ni-2
          k0 = dtice * kki(j  )
          k1 = dtice * kki(j+1)
          AT1(j) = -k0
@@ -645,23 +699,34 @@ endif
          DT0(j) =  C3i*R(j)+rhoice*cp(j)*tiold(j)*henew(j) &
                           - rhoice*em(j)*(henew(j)-heold(j))  ! metric term to close the energy conservation
 
-         IF (w(j) .GT. 0d0) THEN
-            AT1(j) = AT1(j) - C2i*w(j  ) * cp(j-1)
-            DT0(j) = DT0(j) + C2i*w(j  ) *(em(j-1)-cp(j-1)*tiold(j-1))
-         ELSE
-            BT1(j) = BT1(j) - C2i*w(j  ) * cp(j  )
-            DT0(j) = DT0(j) + C2i*w(j  ) *(em(j  )-cp(j  )*tiold(j  ))
-         ENDIF
-         IF (w(j+1) .GT. 0d0) THEN
-            BT1(j) = BT1(j) + C2i*w(j+1) * cp(j  )
-            DT0(j) = DT0(j) - C2i*w(j+1) *(em(j  )-cp(j  )*tiold(j  ))
-         ELSE
-            CT1(j) = CT1(j) + C2i*w(j+1) * cp(j+1)
-            DT0(j) = DT0(j) - C2i*w(j+1) *(em(j+1)-cp(j+1)*tiold(j+1))
-         ENDIF
+            AT1(j) = AT1(j) - C2i*w(j  ) * cp(j-1) * 0.5d0
+            DT0(j) = DT0(j) + C2i*w(j  ) *(em(j-1)-cp(j-1)*tiold(j-1)) * 0.5d0
+            BT1(j) = BT1(j) - C2i*w(j  ) * cp(j  ) * 0.5d0
+            DT0(j) = DT0(j) + C2i*w(j  ) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+
+            BT1(j) = BT1(j) + C2i*w(j+1) * cp(j  ) * 0.5d0
+            DT0(j) = DT0(j) - C2i*w(j+1) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+            CT1(j) = CT1(j) + C2i*w(j+1) * cp(j+1) * 0.5d0
+            DT0(j) = DT0(j) - C2i*w(j+1) *(em(j+1)-cp(j+1)*tiold(j+1)) * 0.5d0
       ENDDO
 
-     if (hs_b(0)>hslim) then
+      ! last prognostic ice layer
+      j=ni-1
+         k0 = dtice * kki(j  )
+         k1 = dtice * kki(j+1)
+         AT1(j) = -k0
+         BT1(j) =  k0 + k1 + rhoice*cp(j)*henew(j)
+         CT1(j) = -k1
+         DT0(j) =  C3i*R(j)+rhoice*cp(j)*tiold(j)*henew(j) &
+                          - rhoice*em(j)*(henew(j)-heold(j))  ! metric term to close the energy conservation
+
+            AT1(j) = AT1(j) - C2i*w(j  ) * cp(j-1) * 0.5d0
+            DT0(j) = DT0(j) + C2i*w(j  ) *(em(j-1)-cp(j-1)*tiold(j-1)) * 0.5d0
+            BT1(j) = BT1(j) - C2i*w(j  ) * cp(j  ) * 0.5d0
+            DT0(j) = DT0(j) + C2i*w(j  ) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+
+
+     if ( .not.thin_snow_active ) then
        k0 = kki(ni)
        k1 = kks(ni)
        AT1(ni)	=   k0
@@ -671,62 +736,69 @@ endif
        DT0(ni)	= ( 0d0)
 
       DO j=ni+1,ns-1
-       k0 = dtice * kks(j-1)
-       k1 = dtice * kks(j)
+        k0 = dtice * kks(j-1)
+        k1 = dtice * kks(j)
             AT1(j) = -k0
             BT1(j) =  k0 + k1 + rhosno*cp(j)*henew(j)
             CT1(j) = -k1
             DT0(j) =  C3s*R(j)+rhosno*cp(j)*tiold(j)*henew(j) &
                              - rhosno*em(j)*(henew(j)-heold(j))
 
-         IF (w(j-1) .GT. 0d0) THEN
-            AT1(j) = AT1(j) - C2s*w(j-1) * cp(j-1)
-            DT0(j) = DT0(j) + C2s*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1))
-         ELSE
-            BT1(j) = BT1(j) - C2s*w(j-1) * cp(j  )
-            DT0(j) = DT0(j) + C2s*w(j-1) *(em(j  )-cp(j  )*tiold(j  ))
-         ENDIF
-         IF (w(j) .GT. 0d0) THEN
-            BT1(j) = BT1(j) + C2s*w(j  ) * cp(j  )
-            DT0(j) = DT0(j) - C2s*w(j  ) *(em(j  )-cp(j  )*tiold(j  ))
-         ELSE
-            CT1(j) = CT1(j) + C2s*w(j  ) * cp(j+1)
-            DT0(j) = DT0(j) - C2s*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1))
-         ENDIF
+! FD actually the ice-snow interface velocity is always zero
+        if (j.ne.ni+1) then
+            AT1(j) = AT1(j) - C2s*w(j-1) * cp(j-1) * 0.5d0
+            DT0(j) = DT0(j) + C2s*w(j-1) *(em(j-1)-cp(j-1)*tiold(j-1)) * 0.5d0
+            BT1(j) = BT1(j) - C2s*w(j-1) * cp(j  ) * 0.5d0
+            DT0(j) = DT0(j) + C2s*w(j-1) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+        endif
+
+        if (j<ns-1) then
+            BT1(j) = BT1(j) + C2s*w(j  ) * cp(j  ) * 0.5d0
+            DT0(j) = DT0(j) - C2s*w(j  ) *(em(j  )-cp(j  )*tiold(j  )) * 0.5d0
+            CT1(j) = CT1(j) + C2s*w(j  ) * cp(j+1) * 0.5d0
+            DT0(j) = DT0(j) - C2s*w(j  ) *(em(j+1)-cp(j+1)*tiold(j+1)) * 0.5d0
+        endif
       ENDDO
 
+! top BC: no melt, simple balance between  k dT/dz = F
        k1 = kks(ns-1)
-       AT1(ns)	=   k1
-       BT1(ns)	= - k1 - dzf
-       DT0(ns)	=  -( Fnet0 + dzf*tiold(ns) )
+       AT1(ns)	= - k1
+       BT1(ns)	=   k1  + dzf
+       DT0(ns)	= Fnet0 + dzf*tiold(ns)
 
-      IF (sbc .EQ. 'flux' .AND. Tsbc) THEN
-       AT1(ns)	= 0d0
-       BT1(ns)	= 1d0
-       DT0(ns)	= Tf(ns)
-      ELSEIF (sbc .EQ. 'fixT') THEN
-       AT1(ns)	= 0d0
-       BT1(ns)	= 1d0
-       DT0(ns)	= Tsurf
+! top BC: k dT/dz - rho w E = F
+      IF (Tsbc) THEN
+      ! last prognostic ice layer
+      j=ns-1
+       CT1(j) = 0.d0
+       DT0(j) = DT0(j) + dtice * ( Fnet + Fprec )
+
+       AT1(ns)	= - k1
+       BT1(ns)	= - rhosno * em(ns)
+       DT0(ns)	= - ( k1 + dzf ) * temp(ns,1) + Fnet0 + dzf*tiold(ns)
       ENDIF
 
 ! FD no snow
-     else if ( hs_b(0) <= hslim ) then ! FD no snow
+     else
 
+! top BC: no melt, simple balance between  k dT/dz = F
        k1 = kki(ni)
-         AT1(ni) =   k1
-         BT1(ni) = - k1 - dzf
-         DT0(ni) =  -( Fnet0 + dzf*tiold(ni) )
+       AT1(ni) = - k1
+       BT1(ni) =   k1 + dzf
+       DT0(ni) =  Fnet0 + dzf*tiold(ni)
 
-      IF (sbc .EQ. 'flux' .AND. Tsbc) THEN
-        AT1(ni)	= 0d0
-        BT1(ni)	= 1d0
-        DT0(ni)	= Tf(ni)
-      ELSEIF (sbc .EQ. 'fixT') THEN
-        AT1(ni)	= 0d0
-        BT1(ni)	= 1d0
-        DT0(ni)	= Tsurf
+! top BC: k dT/dz - rho w E = F
+      IF (Tsbc) THEN
+      ! last prognostic ice layer
+      j=ni-1
+       CT1(j) = dtice * dzf
+       DT0(j) = DT0(j) + dtice * ( Fnet0 + dzf*tiold(ni) )
+
+       AT1(ni)	= - k1
+       BT1(ni)	= - rhoice * em(ni-1)
+       DT0(ni)	= - ( k1 + dzf ) * temp(ni,1) + Fnet0 + dzf*tiold(ni)
       ENDIF
+
      endif ! condition on hs_b
 
       
@@ -735,24 +807,31 @@ endif
 !     Solve for the internal temperature
 !-----------------------------------------------------------------------
 
-     if (hs_b(0)>hslim) then
+     if ( .not.thin_snow_active ) then
       CALL tridag (AT1,BT1,CT1,DT0,tout,ns+1)
-     else if ( hs_b(0) <= hslim ) then ! FD no snow
+     else
       CALL tridag (AT1,BT1,CT1,DT0,tout,ni+1)
      endif
 
-      DO j=0,ni
+      temp(0,1) = tocn
+      dibdt = - tout(0) ! (dibdt = - w)
+      DO j=1,ni
          temp(j,1) = tout(j)
       ENDDO
-     if (hs_b(0)>hslim) then
+     if ( .not.thin_snow_active ) then
       DO j=ni+1,ns
          temp(j,1) = tout(j)
-      ENDDO
-     else if ( hs_b(0) <= hslim ) then ! FD no snow
-      DO j=ni+1,ns
-         temp(j,1) = temp(ni,1)
       ENDDO
      endif
+      if ( Tsbc ) then
+       IF ( .not.thin_snow_active ) THEN
+        temp(ns,1)=Tf(ns)
+        dssdt = - tout(ns) ! (dssdt = - w)
+       else
+        temp(ni,1)=Tf(ni)
+        disdt = - tout(ni) ! (disdt = - w)
+       endif
+      endif
 
          DO j=0,ns
             IF (temp(j,1) .GT. Tf(j)) THEN
@@ -760,25 +839,25 @@ endif
             ENDIF
          ENDDO
 
-!------------------------------------------------------------------------
-!     Update conductive heat fluxes
-!------------------------------------------------------------------------
-
-     IF (hs_b(0) .GT. hslim) THEN
+      IF ( .not.thin_snow_active ) THEN
          Fcss = -kks(ns-1) * ( temp(ns  ,1) - temp(ns-1,1) )
          Fcsb = -kks(ni  ) * ( temp(ni+1,1) - temp(ni  ,1) )
       ELSE
          Fcss = 0d0
          Fcsb = 0d0
       ENDIF
-      
       Fcis = -kki(ni) * ( temp(ni,1) - temp(ni-1,1))
       Fcib = -kki(1 ) * ( temp( 1,1) - temp(   0,1))
+! FD debug
+write(*,*) 'bottom velocity',dibdt, ( Fcib - oceflx) / ( rhoice * em(0) ), hi_b(1)
+!------------------------------------------------------------------------
+!     Update conductive heat fluxes
+!------------------------------------------------------------------------
 
-     if ( hs_b(0) > hslim ) then
-            Fnet = Fnet0 - dzf * (temp(ns,1)-tiold(ns))
+     if ( .not.thin_snow_active ) then
+         Fnet = Fnet0 - dzf * (temp(ns,1)-tiold(ns))
      else ! FD no snow
-            Fnet = Fnet0 - dzf * (temp(ni,1)-tiold(ni))
+         Fnet = Fnet0 - dzf * (temp(ni,1)-tiold(ni))
      endif
 
 ! FD debug
@@ -787,45 +866,34 @@ if (extra_debug) then
  write(*,'(I6,300(f8.3,1x))') counter, temp(0:ns,1)
 endif
 
-     if (hs_b(0)>hslim) then
-! FD debug
-if (extra_debug) then
-write(*,*) 'condition on snow melt', temp(ns,1)+tiny .GE. Tf(ns), Tsbc,-Fnet-Fcss.gt.0.d0
-endif
-      IF (( temp(ns,1)+tiny .GE. Tf(ns)) .AND. (Tsbc .EQV. .FALSE.)) THEN
+     if ( .not.thin_snow_active ) then
+      IF (( temp(ns,1)+tiny .GE. Tf(ns)) .AND. .not.Tsbc ) THEN
          Tsbc = .TRUE. 
       ENDIF
-      IF ( temp(ns,1)+tiny .GE. Tf(ns) .AND. -Fnet-Fcss .GT. 0d0 ) THEN
+      IF ( Tsbc .AND. dssdt > 0d0 ) THEN
          Tsbc = .FALSE.
          temp(ns,1)=Tf(ns)-1d-2
-     ENDIF
-     else if ( hs_b(0) <= hslim ) then ! FD no snow
-! FD debug
-if (extra_debug) then
-write(*,*) 'condition on ice melt', (temp(ni,1)+tiny .GE. Tf(ni)), (Tsbc .EQV. .FALSE.), &
- ((temp(ni,1)+tiny .GE. Tf(ni)) .AND. (Tsbc .EQV. .FALSE.))
-endif
-      IF ((temp(ni,1)+tiny .GE. Tf(ni)) .AND. (Tsbc .EQV. .FALSE.)) THEN
+         dssdt = 0.d0
+      ENDIF
+     else
+      IF ((temp(ni,1)+tiny .GE. Tf(ni)) .AND. .not.Tsbc ) THEN
          Tsbc = .TRUE. 
       ENDIF
-! FD debug
-if (extra_debug) then
-write(*,*) 'condition on ice refreeze',temp(ni,1)+tiny .GE. Tf(ni) , -Fnet-Fcis .GT. 0d0, &
-( temp(ni,1)+tiny .GE. Tf(ni) .AND. -Fnet-Fcis .GT. 0d0 .and. w(ni)==0.d0 )
-endif
-      IF ( temp(ni,1)+tiny .GE. Tf(ni) .AND. -Fnet-Fcis .GT. 0d0 .and. w(ni)==0.d0) THEN
+      IF ( Tsbc .AND. disdt > 0d0 ) THEN
          Tsbc = .FALSE.
          temp(ni,1)=Tf(ni)-1d-2
+         disdt = 0.d0
       ENDIF
      endif
 
 ! FD debug
 if (extra_debug) then
- if (hs_b(0)>hslim) then
+ if ( .not.thin_snow_active ) then
   write(*,*) 'SBCond snow',Tsbc,Fnet,Fcss
  else
   write(*,*) 'SBCond ice',Tsbc,Fnet,Fcis
 endif
+  write(*,*) 'BCond ice',oceflx,Fcib
 endif
 
 !-----------------------------------------------------------------------
@@ -864,16 +932,14 @@ endif
 !-----------------------------------------------------------------------
 
       Frad=0.d0
-      IF ( hs_b(0) > hslim ) THEN
-       DO j=ni+1,ns-1
+      DO j=ni+1,ns-1
          Frad	= Frad + R(j)
-       ENDDO
-      ENDIF
+      ENDDO
       DO j=1,ni
          Frad	= Frad + R(j)
       ENDDO
       
-      Einp = (Fnet+oceflx+Frad+Fprec)*dtice	! E input [J/m2]
+      Einp = (Fnet+oceflx+Frad+Fprec+Fthin_snow)*dtice	! E input [J/m2]
 
       
       Eint = 0d0
@@ -882,12 +948,10 @@ endif
          Elay = func_El(Tf(j),temp(j,1))*henew(j)*rhoice
          Eint = Eint+Elay
       ENDDO
-     if (hs_b(0) > hslim) then
        DO j=ni+1,ns-1
          Elay = func_El(Tf(j),temp(j,1))*henew(j)*rhosno
          Eint = Eint+Elay
       ENDDO
-     endif
      
       dEin = Eint-Ein0		! diff intl E [J/m2]
 ! FD debug
@@ -906,15 +970,6 @@ if (debug) write(*,*) 'energy',Einp,dEin
 !     FUNCTION EL EASIER TO HANDLE
 
 !-----------------------------------------------------------------------
-!     Cumulative growth/melt
-!-----------------------------------------------------------------------
-
-      msurf = msurf-disdt*dtice
-      
-      IF (dibdt .LT. 0d0) gbase = gbase-dibdt*dtice
-      IF (dibdt .GT. 0d0) mbase = mbase+dibdt*dtice
-      
-!-----------------------------------------------------------------------
 !     Reset prognostic variables
 !-----------------------------------------------------------------------
       
@@ -926,15 +981,15 @@ if (debug) then
  write(*,'(I6,300(f8.3,1x))') counter, temp(0:ns,1)
 endif
 ! FD debug if energy not conserved
-      IF ( abs(Einp-dEin) > 1e-3 ) THEN
-       OPEN(1,file='restart.dat')
-       WRITE(1,*) nlice,nlsno,ith_cond
-       WRITE(1,*) ti(1:nlice),ts(1:nlsno+1),tsuold,tbo
-       WRITE(1,*) si(1:nlice)
-       WRITE(1,*) hi,hsold
-       WRITE(1,*) sfallold,dwnlw,tsuold,tair,qair,uair,swrad,oceflx,pres
-       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
-       CLOSE(1)
+      IF ( abs(Einp-dEin) > 1e-3 .or. isnan(hs_b(1)) ) THEN
+!       OPEN(1,file='restart.dat')
+!       WRITE(1,*) nlice,nlsno,ith_cond
+!       WRITE(1,*) ti(1:nlice),ts(1:nlsno+1),tsuold,tbo
+!       WRITE(1,*) si(1:nlice)
+!       WRITE(1,*) hi,hsold
+!       WRITE(1,*) sfallold,dwnlw,tsuold,tair,qair,uair,swrad,oceflx,pres
+!       WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
+!       CLOSE(1)
        STOP 'energy not conserved'
       ENDIF
 
