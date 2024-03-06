@@ -650,71 +650,29 @@ endif
 !     matrix coefficients [matj] {x} = {D}
 !-----------------------------------------------------------------------
 
-      matj(:,:)=0d0
-         AT1=0.d0; BT1=0.d0; CT1=0.d0; DT0=0.d0;
+         matj(:,:) = 0.d0
 
 
-      IF (bbc .EQ. 'fixT') THEN
-         BT1(0)	= 1d0
-         DT0(0)	= tocn - temp(0,0)
-      ELSE
          k0 = kki(0)
-         BT1(0) =   k0
-         CT1(0) = - k0
-         DT0(0) = Fbase + k0 * ( temp(1,0) - temp(0,0) )
-      ENDIF
+! the unknown is w(0)
+         DT0(0)    = - w(0) * rhoice * energy_bot - oceflx + Fcib ! line 0 is for w(0)
+         matj(0,0) = rhoice * energy_bot       ! w increment
+         matj(1,0) = k0                        ! dFcib/dT increment
 
       DO j=1,ni
          k0 = kki(j-1)
          k1 = kki(j  )
-         AT1(j) = -k0
-         BT1(j) =  k0 + k1 + rhoice*cp(j)*henew(j) / dtice
-         CT1(j) = -k1
-         DT0(j) =  R(j) - rhoice*(em(j)*henew(j)-em0(j)*heold(j))/dtice & ! metric term to close the energy conservation
-                        + k0 * ( temp(j-1,0) - temp(j,0) ) &
-                        + k1 * ( temp(j+1,0) - temp(j,0) )
-
-! lower transport
-         if (j==1) then
-            AT1(j) = AT1(j) - rhoice*w(j-1) * cp(j-1)
-            DT0(j) = DT0(j) + rhoice*w(j-1) * em(j-1)
-         else
-if (.not.adv_upwind) then
-            AT1(j) = AT1(j) - rhoice*w(j-1) * cp(j-1) * 0.5d0
-            DT0(j) = DT0(j) + rhoice*w(j-1) * em(j-1) * 0.5d0
-            BT1(j) = BT1(j) - rhoice*w(j-1) * cp(j  ) * 0.5d0
-            DT0(j) = DT0(j) + rhoice*w(j-1) * em(j  ) * 0.5d0
-else
-  if (w(j-1)>0.d0) then
-            AT1(j) = AT1(j) - rhoice*w(j-1) * cp(j-1)
-            DT0(j) = DT0(j) + rhoice*w(j-1) * em(j-1)
-  else
-            BT1(j) = BT1(j) - rhoice*w(j-1) * cp(j  )
-            DT0(j) = DT0(j) + rhoice*w(j-1) * em(j  )
-  endif
-endif
-         endif
-
-! upper transport
-         if (j<ni) then
-if (.not.adv_upwind) then
-            BT1(j) = BT1(j) + rhoice*w(j  ) * cp(j  ) * 0.5d0
-            DT0(j) = DT0(j) - rhoice*w(j  ) * em(j  ) * 0.5d0
-            CT1(j) = CT1(j) + rhoice*w(j  ) * cp(j+1) * 0.5d0
-            DT0(j) = DT0(j) - rhoice*w(j  ) * em(j+1) * 0.5d0
-else
-  if (w(j  )>0.d0) then
-            BT1(j) = BT1(j) + rhoice*w(j  ) * cp(j  )
-            DT0(j) = DT0(j) - rhoice*w(j  ) * em(j  )
-  else
-            CT1(j) = CT1(j) + rhoice*w(j  ) * cp(j+1)
-            DT0(j) = DT0(j) - rhoice*w(j  ) * em(j+1)
-  endif
-endif
-         else ! no choice but to use an upwind formulation during ice surface melt (em=0 at surface)
-            BT1(j) = BT1(j) + rhoice*w(j  ) * cp(j  )
-            DT0(j) = DT0(j) - rhoice*w(j  ) * em(j  )
-         endif
+         DT0(j) =  R(j) + ( & ! radiation
+                          - rhoice*(henew(j)*em(j)-heold(j)*em0(j)))/dtice & ! time tendency energy
+                        + k0 * ( temp(j-1,1) - temp(j,1) ) &
+                        + k1 * ( temp(j+1,1) - temp(j,1) )
+         matj(j-1,j) = -k0
+         matj(j  ,j) =  k0 + k1 + rhoice * cp(j) * henew(j) / dtice
+         matj(j+1,j) = -k1
+! Newton terms for change in thickness
+         matj(0   ,j) =   rhoice * em(j) * dzi(j)
+         if ( Tsbc .and. thin_snow_active ) &
+         matj(ni+1,j) = - rhoice * em(j) * dzi(j)
       ENDDO
 
      if ( .not.thin_snow_active ) then
@@ -722,82 +680,254 @@ endif
       DO j=ni+1,ns
         k0 = kks(j-1)
         k1 = kks(j)
-            AT1(j) = -k0
-            BT1(j) =  k0 + k1 + rhosno*cp(j)*henew(j) / dtice
-            CT1(j) = -k1
-            DT0(j) =  R(j) - rhosno*(em(j)*henew(j)-em0(j)*heold(j))/dtice &
-                        + k0 * ( temp(j-1,0) - temp(j,0) ) &
-                        + k1 * ( temp(j+1,0) - temp(j,0) )
-
-if (.not.adv_upwind) then
-! FD actually the ice-snow interface velocity is always zero (no special treatment for j=ni+1)
-            AT1(j) = AT1(j) - rhosno*w(j-1) * cp(j-1) * 0.5d0
-            DT0(j) = DT0(j) + rhosno*w(j-1) * em(j-1) * 0.5d0
-            BT1(j) = BT1(j) - rhosno*w(j-1) * cp(j  ) * 0.5d0
-            DT0(j) = DT0(j) + rhosno*w(j-1) * em(j  ) * 0.5d0
-else
-  if (w(j-1)>0.d0) then
-            AT1(j) = AT1(j) - rhosno*w(j-1) * cp(j-1)
-            DT0(j) = DT0(j) + rhosno*w(j-1) * em(j-1)
-  else
-            BT1(j) = BT1(j) - rhosno*w(j-1) * cp(j  )
-            DT0(j) = DT0(j) + rhosno*w(j-1) * em(j  )
-  endif
-endif
-        if (j==ns) then
-            CT1(j) = CT1(j) + rhosno*w(j  ) * cp(j+1)
-            DT0(j) = DT0(j) - rhosno*w(j  ) * em(j+1)
-        else
-if (.not.adv_upwind) then
-            BT1(j) = BT1(j) + rhosno*w(j  ) * cp(j  ) * 0.5d0
-            DT0(j) = DT0(j) - rhosno*w(j  ) * em(j  ) * 0.5d0
-            CT1(j) = CT1(j) + rhosno*w(j  ) * cp(j+1) * 0.5d0
-            DT0(j) = DT0(j) - rhosno*w(j  ) * em(j+1) * 0.5d0
-else
-  if (w(j  )>0.d0) then
-            BT1(j) = BT1(j) + rhosno*w(j  ) * cp(j  )
-            DT0(j) = DT0(j) - rhosno*w(j  ) * em(j  )
-  else
-            CT1(j) = CT1(j) + rhosno*w(j  ) * cp(j+1)
-            DT0(j) = DT0(j) - rhosno*w(j  ) * em(j+1)
-  endif
-endif
-        endif
+         matj(j-1,j) = -k0
+         matj(j  ,j) =  k0 + k1 + rhosno * cp(j) * henew(j) / dtice
+         matj(j+1,j) = -k1
+         DT0(j)      =  R(j) + ( & ! radiation
+                          - rhosno*(henew(j)*em(j)-heold(j)*em0(j)))/dtice & ! time tendency energy
+                        + k0 * ( temp(j-1,1) - temp(j,1) ) &
+                        + k1 * ( temp(j+1,1) - temp(j,1) )
+! Newton terms for change in thickness
+         if ( Tsbc) &
+         matj(ns+1,j) = - rhosno * em(j) * dzi(j)
       ENDDO
 
-       k1 = kks(ns)
-       AT1(ns+1)	= - k1
-       BT1(ns+1)	=   k1 + dzf
-       DT0(ns+1)	=   Fnet + k1 * ( temp(ns,0) - temp(ns+1,0) )
+      j=ns+1
+       k0 = kks(j-1)
+       matj(j-1,j) = - k0
+       matj(j  ,j) =   k0 + dzf
+       DT0(j)      =   Fnet + Fcss
 
-      IF (sbc .EQ. 'flux' .AND. Tsbc) THEN
-       AT1(ns+1)	= 0d0
-       BT1(ns+1)	= 1d0
-       DT0(ns+1)	= Tf(ns+1) - temp(ns+1,0)
-      ELSEIF (sbc .EQ. 'fixT') THEN
-       AT1(ns+1)	= 0d0
-       BT1(ns+1)	= 1d0
-       DT0(ns+1)	= Tsurf - temp(ns+1,0)
+      IF (Tsbc) THEN
+! solve for delta w(ns)
+         DT0(j)      = - w(ns) * rhosno * qm(ns+1) + Fnet + Fcss ! line 0 is for w(0)
+         matj(j  ,j) = rhosno * qm(ns+1)                         ! w increment
+         matj(j-1,j) = - k0                                      ! dFcss/dT increment
       ENDIF
 
 ! FD no snow
      else
 
-       k1 = kki(ni)
-         AT1(ni+1) = - k1
-         BT1(ni+1) =   k1 + dzf
-         DT0(ni+1) =  Fnet + k1 * ( temp(ni,0) - temp(ni+1,0) )
+       j=ni+1
+       k0 = kki(j-1)
+       matj(j-1,j) = - k0
+       matj(j  ,j) =   k0 + dzf
+       DT0(j)      =   Fnet + Fcis
 
-      IF (sbc .EQ. 'flux' .AND. Tsbc) THEN
-        AT1(ni+1)	= 0d0
-        BT1(ni+1)	= 1d0
-        DT0(ni+1)	= Tf(ni+1) - temp(ni+1,0)
-      ELSEIF (sbc .EQ. 'fixT') THEN
-        AT1(ni+1)	= 0d0
-        BT1(ni+1)	= 1d0
-        DT0(ni+1)	= Tsurf - temp(ni+1,0)
+      IF (Tsbc) THEN
+         DT0(j)      = - w(ni) * rhoice * qm(ni+1) + Fnet + Fcis ! line 0 is for w(0)
+         matj(j  ,j) = rhoice * qm(ni+1)                         ! w increment
+         matj(j-1,j) = - k0                                      ! dFcis/dT increment
       ENDIF
      endif ! condition on hs_b
+
+!-----------------------------------------------------------------------
+!     add transport to the equations
+!-----------------------------------------------------------------------
+
+!-----------------------------------------------------------------------
+! lower transport in ice
+!-----------------------------------------------------------------------
+
+! at bottom, treat as centered but temperature is at some position as w(0) so looks like upwind
+         j=1
+            DT0(j)      = DT0(j)      + rhoice * w(j-1) * em(j-1)
+
+         if (adv_upwind) then
+          do j=2,ni
+           if (w(j-1)>0.d0) then
+            matj(j-1,j) = matj(j-1,j) - rhoice * w(j-1) * cp(j-1)
+            DT0(j)      = DT0(j)      + rhoice * w(j-1) * em(j-1)
+           else
+            matj(j  ,j) = matj(j  ,j) - rhoice * w(j-1) * cp(j  )
+            DT0(j)      = DT0(j)      + rhoice * w(j-1) * em(j  )
+           endif
+          enddo
+         else
+          do j=2,ni
+            matj(j-1,j) = matj(j-1,j) - rhoice * w(j-1) * cp(j-1) * 0.5d0
+            DT0(j)      = DT0(j)      + rhoice * w(j-1) * em(j-1) * 0.5d0
+            matj(j  ,j) = matj(j  ,j) - rhoice * w(j-1) * cp(j  ) * 0.5d0
+            DT0(j)      = DT0(j)      + rhoice * w(j-1) * em(j  ) * 0.5d0
+          enddo
+         endif
+
+! metric terms, newton terms for change in thickness
+         j=1
+            matj(0   ,j) = matj(0   ,j) - rhoice * em(j-1) * (1d0-zi(j-1))
+         if (adv_upwind) then
+          do j=2,ni
+           if (w(j-1)>0.d0) then
+            matj(0   ,j) = matj(0   ,j) - rhoice * em(j-1) * (1d0-zi(j-1))
+            if ( Tsbc .and. thin_snow_active ) &
+            matj(ni+1,j) = matj(ni+1,j) - rhoice * em(j-1) *      zi(j-1)
+           else
+            matj(0   ,j) = matj(0   ,j) - rhoice * em(j  ) * (1d0-zi(j-1))
+            if ( Tsbc .and. thin_snow_active ) &
+            matj(ni+1,j) = matj(ni+1,j) - rhoice * em(j  ) *      zi(j-1)
+           endif
+          enddo
+         else
+          do j=2,ni
+            matj(0   ,j) = matj(0   ,j) - rhoice * em(j-1) * (1d0-zi(j-1)) * 0.5d0
+            matj(0   ,j) = matj(0   ,j) - rhoice * em(j  ) * (1d0-zi(j-1)) * 0.5d0
+           if ( Tsbc .and. thin_snow_active ) then
+            matj(ni+1,j) = matj(ni+1,j) - rhoice * em(j-1) *      zi(j-1)  * 0.5d0
+            matj(ni+1,j) = matj(ni+1,j) - rhoice * em(j  ) *      zi(j-1)  * 0.5d0
+           endif
+          enddo
+         endif
+   
+!-----------------------------------------------------------------------
+! upper transport in ice
+!-----------------------------------------------------------------------
+
+         if (adv_upwind) then
+          do j=1,ni-1
+           if (w(j  )>0.d0) then
+            matj(j  ,j) = matj(j  ,j) + rhoice * w(j  ) * cp(j  )
+            DT0(j)      = DT0(j)      - rhoice * w(j  ) * em(j  )
+           else
+            matj(j+1,j) = matj(j+1,j) + rhoice * w(j  ) * cp(j+1)
+            DT0(j)      = DT0(j)      - rhoice * w(j  ) * em(j+1)
+           endif
+          enddo
+         else
+          do j=1,ni-1
+            matj(j  ,j) = matj(j  ,j) + rhoice * w(j  ) * cp(j  ) * 0.5d0
+            DT0(j)      = DT0(j)      - rhoice * w(j  ) * em(j  ) * 0.5d0
+            matj(j+1,j) = matj(j+1,j) + rhoice * w(j  ) * cp(j+1) * 0.5d0
+            DT0(j)      = DT0(j)      - rhoice * w(j  ) * em(j+1) * 0.5d0
+          enddo
+         endif
+
+! surface treatment assuming melting, looks like an upwind formulation (em=cp_ice*Tf at surface)
+         j=ni
+            DT0(j)      = DT0(j)      - rhoice * w(j  ) * em(j+1)
+
+! metric terms, newton terms for change in thickness
+         if (adv_upwind) then
+          do j=1,ni-1
+           if (w(j  )>0.d0) then
+            matj(0   ,j) = matj(0   ,j) + rhoice * em(j  ) * (1d0-zi(j  ))
+            if ( Tsbc .and. thin_snow_active ) &
+            matj(ni+1,j) = matj(ni+1,j) + rhoice * em(j  ) *      zi(j  )
+           else
+            matj(0   ,j) = matj(0   ,j) + rhoice * em(j+1) * (1d0-zi(j  ))
+            if ( Tsbc .and. thin_snow_active ) &
+            matj(ni+1,j) = matj(ni+1,j) + rhoice * em(j+1) *      zi(j  )
+           endif
+          enddo
+         else
+          do j=1,ni-1
+            matj(0   ,j) = matj(0   ,j) + rhoice * em(j  ) * (1d0-zi(j  )) * 0.5d0
+            matj(0   ,j) = matj(0   ,j) + rhoice * em(j+1) * (1d0-zi(j  )) * 0.5d0
+           if ( Tsbc .and. thin_snow_active ) then
+            matj(ni+1,j) = matj(ni+1,j) + rhoice * em(j  ) *      zi(j  )  * 0.5d0
+            matj(ni+1,j) = matj(ni+1,j) + rhoice * em(j+1) *      zi(j  )  * 0.5d0
+           endif
+          enddo
+         endif
+         j=ni ! upper transport in ice+snow is zero, therefore it only remains case of thin_snow and top melt
+           if ( Tsbc .and. thin_snow_active ) then
+            matj(ni+1,j) = matj(ni+1,j) + rhoice * em(j+1) *      zi(j  )
+           endif
+
+
+!-----------------------------------------------------------------------
+! lower transport in snow
+!-----------------------------------------------------------------------
+      if ( .not.thin_snow_active ) then
+
+         if (adv_upwind) then
+          do j=ni+1,ns
+           if (w(j-1)>0.d0) then
+            matj(j-1,j) = matj(j-1,j) - rhosno * w(j-1) * cp(j-1)
+            DT0(j)      = DT0(j)      + rhosno * w(j-1) * em(j-1)
+           else
+            matj(j  ,j) = matj(j  ,j) - rhoice * w(j-1) * cp(j  )
+            DT0(j)      = DT0(j)      + rhoice * w(j-1) * em(j  )
+           endif
+          enddo
+         else
+          do j=ni+1,ns
+            matj(j-1,j) = matj(j-1,j) - rhosno * w(j-1) * cp(j-1) * 0.5d0
+            DT0(j)      = DT0(j)      + rhosno * w(j-1) * em(j-1) * 0.5d0
+            matj(j  ,j) = matj(j  ,j) - rhosno * w(j-1) * cp(j  ) * 0.5d0
+            DT0(j)      = DT0(j)      + rhosno * w(j-1) * em(j  ) * 0.5d0
+          enddo
+         endif
+
+
+! metric terms, newton terms for change in thickness
+        if ( Tsbc ) then
+         if (adv_upwind ) then
+          do j=ni+1,ns
+           if (w(j-1)>0.d0) then
+            matj(ns+1,j) = matj(ns+1,j) - rhosno * em(j-1) *      zs(j-1)
+           else
+            matj(ns+1,j) = matj(ns+1,j) - rhosno * em(j  ) *      zs(j-1)
+           endif
+          enddo
+         else
+          do j=ni+1,ns
+            matj(ns+1,j) = matj(ns+1,j) - rhosno * em(j-1) *      zs(j-1)  * 0.5d0
+            matj(ns+1,j) = matj(ns+1,j) - rhosno * em(j  ) *      zs(j-1)  * 0.5d0
+          enddo
+         endif
+        endif
+
+!-----------------------------------------------------------------------
+! upper transport in snow
+!-----------------------------------------------------------------------
+
+         if (adv_upwind) then
+          do j=ni+1,ns-1
+           if (w(j  )>0.d0) then
+            matj(j  ,j) = matj(j  ,j) + rhosno * w(j  ) * cp(j  )
+            DT0(j)      = DT0(j)      - rhosno * w(j  ) * em(j  )
+           else
+            matj(j+1,j) = matj(j+1,j) + rhosno * w(j  ) * cp(j+1)
+            DT0(j)      = DT0(j)      - rhosno * w(j  ) * em(j+1)
+           endif
+          enddo
+         else
+          do j=ni+1,ns-1
+            matj(j  ,j) = matj(j  ,j) + rhosno * w(j  ) * cp(j  ) * 0.5d0
+            DT0(j)      = DT0(j)      - rhosno * w(j  ) * em(j  ) * 0.5d0
+            matj(j+1,j) = matj(j+1,j) + rhosno * w(j  ) * cp(j+1) * 0.5d0
+            DT0(j)      = DT0(j)      - rhosno * w(j  ) * em(j+1) * 0.5d0
+          enddo
+         endif
+
+! force upwind treatment for top surface
+        j=ns
+            DT0(j)      = DT0(j)      - rhosno * w(j  ) * em(j+1)
+        if (.not.Tsbc) then
+            matj(j+1,j) = matj(j+1,j) + rhosno * w(j  ) * cp(j+1)
+        endif
+
+! metric terms, newton terms for change in thickness
+        if ( Tsbc ) then
+         if (adv_upwind) then
+          do j=ni+1,ns-1
+           if (w(j  )>0.d0) then
+            matj(ns+1,j) = matj(ns+1,j) + rhosno * em(j  ) *      zs(j  )
+           else
+            matj(ns+1,j) = matj(ns+1,j) + rhosno * em(j+1) *      zs(j  )
+           endif
+          enddo
+         else
+          do j=ni+1,ns-1
+            matj(ns+1,j) = matj(ns+1,j) + rhosno * em(j  ) *      zs(j  )  * 0.5d0
+            matj(ns+1,j) = matj(ns+1,j) + rhosno * em(j+1) *      zs(j  )  * 0.5d0
+          enddo
+         endif
+         j=ns
+            matj(ns+1,j) = matj(ns+1,j) + rhosno * em(j+1) *      zs(j  )
+        endif
+
+      endif ! active snow
 
 !-----------------------------------------------------------------------
 ! prepare linear solver
@@ -812,37 +942,39 @@ endif
       residual=0d0
       do j=1,ntot-1
          residual=residual+dt0(j)
+! FD debug
+write(*,*) 'res',j,dt0(j)
       enddo
       if (debug) write(*,*) 'residual',counter,residual
-!! FD debug
+! FD debug
 !write(*,*) 'mat'
 !do j=0,ntot-1
 ! write(*,'(6(e10.3,1x),3x,e10.3)') matj(0:ntot-1,j),dt0(j)
 !enddo
-!        ml = ntot - 1
-!       mu = ml
-!        MT = ML + MU + 1
+        ml = ntot - 1
+        mu = ml
+        MT = ML + MU + 1
 !        write(*,*) 'bandwidth',MT, ML
-!!        bandmax=ML+MT
-!        bandmax=2*maxlay ! hardcoded for now
-!      do i=1,ntot
-!       do k=1,bandmax
-!         matband(k,i)=0.d0
-!       enddo
-!      enddo
-!      do i=1,ntot
-!       do j=1,ntot
-!         K = I - J + MT
-!         matband(k,j)=matj(j-1,i-1)
-!       enddo
-!      enddo
-!!       call DGBCO(matband,bandmax,nn,ML,MU,IPVT,RCOND,work)
-!!       write(*,*) 'rcond for the current matrix is',rcond
-!      call DGBFA(matband,bandmax,ntot,ML,MU,IPVT,INFO)
+!        bandmax=ML+MT
+        bandmax=2*maxlay ! hardcoded for now
+      do i=1,ntot
+       do k=1,bandmax
+         matband(k,i)=0.d0
+       enddo
+      enddo
+      do i=1,ntot
+       do j=1,ntot
+         K = I - J + MT
+         matband(k,j)=matj(j-1,i-1)
+       enddo
+      enddo
+!       call DGBCO(matband,bandmax,nn,ML,MU,IPVT,RCOND,work)
+!       write(*,*) 'rcond for the current matrix is',rcond
+      call DGBFA(matband,bandmax,ntot,ML,MU,IPVT,INFO)
 !      write(*,*) 'matrix factorization done'
-!      tout(0:ntot-1)=dt0(0:ntot-1)
-!      call DGBSL(matband,bandmax,ntot,ML,MU,IPVT,tout,0)
-!! FD debug
+      tout(0:ntot-1)=dt0(0:ntot-1)
+      call DGBSL(matband,bandmax,ntot,ML,MU,IPVT,tout,0)
+! FD debug
 !write(*,*) 'solution'
 !do j=0,ntot-1
 ! write(*,'(e10.3)') tout(j)
@@ -852,14 +984,20 @@ endif
 !     Solve for the internal temperature
 !-----------------------------------------------------------------------
 
-     if ( .not.thin_snow_active ) then
-      CALL tridag (AT1,BT1,CT1,DT0,tout,ns+2)
-     else
-      CALL tridag (AT1,BT1,CT1,DT0,tout,ni+2)
-     endif
+!     if ( .not.thin_snow_active ) then
+!      CALL tridag (AT1,BT1,CT1,DT0,tout,ns+2)
+!     else
+!      CALL tridag (AT1,BT1,CT1,DT0,tout,ni+2)
+!     endif
+
+! always melting or accreting ice to the bottom
+     temp(0,1) = temp(0,0)
+     w(0)=w(0)+tout(0)
+! FD debug
+write(*,*) 'w bottom 1',w(0)
 
 ! ice column increment to temperature
-      DO j=0,ni
+      DO j=1,ni
          temp(j,1) = temp(j,0) + tout(j)
       ENDDO
 
@@ -867,13 +1005,28 @@ endif
      if ( .not.thin_snow_active ) then
 
 ! snow column increment to temperature
-      DO j=ni+1,ns+1
+      DO j=ni+1,ns
          temp(j,1) = temp(j,0) + tout(j)
       ENDDO
+      if (Tsbc) then
+! melting case
+        w(ns) = w(ns) + tout(ns+1)
+        temp(ns+1,1) = Tf(ns+1)
+      else
+! cold surface case, update temperature
+        temp(ns+1,1) = temp(ns+1,0) + tout(ns+1)
+      endif
 
      else ! thin ice case
 
-      temp(ni+1,1) = temp(ni+1,0) + tout(ni+1)
+      if (Tsbc) then
+! melting case
+        w(ns) = w(ns) + tout(ns+1)
+        temp(ni+1,1) = Tf(ni+1)
+      else
+! cold surface case, update temperature
+        temp(ni+1,1) = temp(ni+1,0) + tout(ni+1)
+      endif
 ! in any case, the temperature of snow is overwritten by that of ice
       temp(ni+2:ns+1,1) = temp(ni+1,1)
      endif
@@ -892,13 +1045,6 @@ endif
 !               kki(j+1)=kki(j+1)*0.1d0
             ENDIF
          ENDDO
-!! FD debug
-!write(*,*) 'vertical solution'
-!write(*,*) w(0),w(ntot-2)
-!write(*,*) 'temperature solution'
-!do j=0,ntot-1
-! write(*,*) temp(j,1)
-!enddo
 
 !------------------------------------------------------------------------
 !     Update conductive heat fluxes
