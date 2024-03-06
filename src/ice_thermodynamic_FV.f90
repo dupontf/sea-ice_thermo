@@ -238,8 +238,7 @@ subroutine ice_thermo(dtice)
   double precision,save :: latsub = 2.834d6        ! J/kg latent heat of sublimation
   logical :: adv_upwind=.false.
 ! FD debug
- debug=.true.
-! adv_upwind = .true.
+! debug=.true.
 ! extra_debug=.true.
       hicut=1.d-2
 
@@ -436,10 +435,12 @@ subroutine ice_thermo(dtice)
       ! net longwave radiative flux
       netlw = emi*(dwnlw - stefa*tsu*tsu*tsu*tsu)
       ! sensible and latent heat flux
-      CALL flx(hi,tsu,tair,qair,fsens, &
-     &         flat,q0,zrchu1,zrchu2,uair,zref)
-      fsens   =  -fsens
-      flat   =  MIN( -flat , 0.d0 ) ! always negative, as precip 
+!      fsens   =  -fsens
+! FD debug
+if (extra_debug) then
+ write(*,*) 'fsens,flat',fsens,MIN( flat , 0.d0 ),dwnlw,netlw
+endif
+      flat   =  MIN( flat , 0.d0 ) ! always negative, as precip 
                                            ! energy already added
 
       ! pressure of water vapor saturation (Pa)
@@ -449,7 +450,7 @@ subroutine ice_thermo(dtice)
      &              (0.622d0*es)*log(10.d0)*9.5d0* &
      &              ((273.16d0-7.66d0)/(tsu-7.66d0)**2.d0)
       ! derivative of the surface atmospheric net flux
-          dzf    =  4.d0*emi*stefa*tsu*tsu*tsu + zrchu1+zrchu2*zssdqw
+          dzf    =  4.d0*emi*stefa*tsu*tsu*tsu
 
       ! surface atmospheric net flux
       Fnet0 =  fac_transmi * swrad + netlw + fsens + flat
@@ -823,32 +824,45 @@ endif
          temp(ns+1,1) = tout(ni+1)
      endif
 
-     IF (counter.gt.11) THEN
+     IF (counter.gt.11.and.counter.le.20) THEN
          DO j=0,ns+1
             temp(j,1) = 0.5d0 * ( temp(j,0) + temp(j,1) )
          ENDDO
+     ELSE IF (counter.gt.21.and.counter.le.40) THEN
+         DO j=0,ns+1
+            temp(j,1) = 0.6d0 * temp(j,0) + 0.4d0* temp(j,1)
+         ENDDO
+     ELSE IF (counter.gt.41.and.counter.le.60) THEN
+         DO j=0,ns+1
+            temp(j,1) = 0.7d0 * temp(j,0) + 0.3d0* temp(j,1)
+         ENDDO
+     ELSE IF (counter.gt.61.and.counter.le.80) THEN
+         DO j=0,ns+1
+            temp(j,1) = 0.8d0 * temp(j,0) + 0.2d0* temp(j,1)
+         ENDDO
+     ELSE IF (counter.gt.81) THEN
+         DO j=0,ns+1
+            temp(j,1) = 0.9d0 * temp(j,0) + 0.1d0* temp(j,1)
+         ENDDO
      ENDIF
 
-         DO j=0,ni
+         DO j=1,ns
             IF (temp(j,1) .GT. Tf(j)) THEN
-               temp(j,1) = Tf(j)
-                kki(j-1)=kki(j-1)*10.d0
-                kki(j  )=kki(j )*0.1d0
 ! FD debug
-write(*,*) 'ice temp pb',j,counter
-           ENDIF
-         ENDDO
-         temp(ni+1,1)=MIN(temp(ni+1,1),Tf(ni+1))
-         DO j=ni+2,ns
-            IF (temp(j,1) .GT. Tf(j)) THEN
+if (debug) then
+ write(*,*) 'detecting Temp pb at',j,temp(j,1),Tf(j)
+endif
                temp(j,1) = Tf(j)
-               kks(j-1)=kks(j-1)*10.d0
-               kks(j  )=kks(j  )*0.1d0
-! FD debug
-write(*,*) 'snow temp pb',j,counter
+               Fnet = Fnet + sum(R(1:ns))
+               Fnet0= Fnet0+ sum(R(1:ns))
+               R(1:ns) = 0.d0
+               kki(j  )=kki(j  )*10.d0
+               kki(j+1)=kki(j+1)*0.1d0
+!               kks(j  )=kks(j  )*10.d0
+!               kks(j+1)=kks(j+1)*0.1d0
             ENDIF
          ENDDO
-         temp(ns+1,1)=MIN(temp(ns+1,1),Tf(ns+1))
+         temp(ns+1,1)=MIN(temp(ns+1,1),Tf(ns+1)) ! not too much worry if melting occurs at surface
 
 !------------------------------------------------------------------------
 !     Update conductive heat fluxes
@@ -864,7 +878,12 @@ write(*,*) 'snow temp pb',j,counter
       
       Fcis = -kki(ni) * ( temp(ns+1,1) - temp(ni  ,1))  ! only valid for no-snow case
       Fcib = -kki(0 ) * ( temp(   1,1) - temp(   0,1))
-      Fnet = Fnet0 - dzf * (temp(ns+1,1)-tiold(ns+1))
+
+     if ( .not.thin_snow_active ) then
+         Fnet = Fnet0 - dzf * (temp(ns+1,1)-tiold(ns+1))
+     else ! FD no snow
+         Fnet = Fnet0 - dzf * (temp(ns+1,1)-tiold(ns+1))
+     endif
 
 ! FD debug
 if (extra_debug) then
@@ -1006,14 +1025,15 @@ if (debug) then
  write(*,'(I6,300(f8.3,1x))') counter, temp(0:ns+1,1)
 endif
 ! FD debug if energy not conserved
-      IF ( abs(Einp-dEin) > 1e-3 ) THEN
+      IF ( abs(Einp-dEin)/dtice > 1e-3 ) THEN
        OPEN(1,file='restart.dat')
-       WRITE(1,*) nlice,nlsno,ith_cond
+       WRITE(1,*) nlice,nlsno,ith_cond,dtice
        WRITE(1,*) ti(1:nlice),ts(1:nlsno),tsuold,tbo
        WRITE(1,*) si(1:nlice)
        WRITE(1,*) hi,hsold
        WRITE(1,*) sfallold,dwnlw,tsuold,tair,qair,uair,swrad,oceflx,pres
        WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
+       WRITE(1,*) fsens,flat
        CLOSE(1)
        STOP 'energy not conserved'
       ENDIF
@@ -1063,9 +1083,11 @@ endif
       if (dh_sni > 0.d0 ) then
        hi  = hi + dh_sni
        hs  = hs - dh_sni
-       WRITE(*,*) ' dh_snowice : ', dh_sni
-       WRITE(*,*) ' ht_s_b : ', hs
-       WRITE(*,*) ' ht_i_b : ', hi
+       if (debug) then
+        WRITE(*,*) ' dh_snowice : ', dh_sni
+        WRITE(*,*) ' ht_s_b : ', hs
+        WRITE(*,*) ' ht_i_b : ', hi
+       endif
       endif
 
 ! conversion from LIM3
