@@ -250,7 +250,7 @@ subroutine ice_thermo(dtice)
   logical :: adv_upwind=.false.
 ! FD debug
  debug=.true.
-! extra_debug=.true.
+ extra_debug=.true.
       hicut=1.d-2
 
 !------------------------------------------------------------------------
@@ -485,7 +485,7 @@ endif
 
     fthin_snow = 0.d0
     DO j=ni+1,ns
-       Elay = em(j)*rhosno*heold(j)
+       Elay = em0(j)*rhosno*heold(j)
        fthin_snow = fthin_snow + Elay
     ENDDO
     fthin_snow = - fthin_snow / dtice
@@ -499,7 +499,6 @@ endif
     Tf(ni+1:ns+1) = Tf(ni)
     sali(ni+1:ns+1,0) = sali(ni,0)
 
-!---------------------------------------------------------------------
   endif ! end thin snow
 !---------------------------------------------------------------------
 
@@ -561,6 +560,7 @@ endif
 
          IF (temp(ns+1,1)+tiny .GE. Tf(ns+1) .AND. -Fnet-Fcss .LT. 0d0) THEN
 ! FD the code cannot deal with concomittent snow accumulation and melt
+            Tsbc = .true.
             dssdt = MIN((-Fnet-Fcss)/rhosno/qm(ns+1),0d0)
             snow_precip = 0.d0
          ENDIF
@@ -569,7 +569,8 @@ endif
       ! update ice surface
 
          IF (temp(ns+1,1)+tiny .GE. Tf(ns+1) .AND. -Fnet-Fcis .LT. 0d0) THEN
-           disdt = MIN((-Fnet-Fcis)/rhoice/qm(ni),0d0)
+            Tsbc = .true.
+            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ni+1),0d0)
          ENDIF
       endif
 
@@ -589,10 +590,12 @@ endif
    if ( hs_b(1) < 0.d0 .and. .not.thin_snow_active ) then
       sume2 = 0.d0
       do j=ni+1,ns
-        sume2 = sume2 + em(j) * rhosno * heold(j)
+        sume2 = sume2 + em0(j) * rhosno * heold(j)
       enddo
       energy_snow_melt = -sume2
       fthin_snow = energy_snow_melt / dtice
+! FD debug
+if (extra_debug) write(*,*) 'switch to thin_snow_active',hs_b(1),fthin_snow
       fwf = fwf + hs_b(0) / dtice / rhowat * rhosno
       Tsbc = .false.
       thin_snow_active = .true.
@@ -606,6 +609,17 @@ endif
       kki(ni) = ki(ni) / (hi_b(0) * dzzi(ni))
       Tf(ni+1:ns+1) = Tf(ni)
       sali(ni+1:ns+1,0) = sali(ni,0)
+      temp(ni+1:ns+1,1) = Tf(ni)
+      qm(ni+1:ns+1)   = func_qm(Tf(ni+1),temp(ni+1,1))
+      em(ni+1:ns+1)   = func_el(Tf(ni+1),temp(ni+1,1))
+      ! update ice surface
+
+      Fcis = -kki(ni) * ( temp(ns+1,1) - temp(ni  ,1))
+         IF (temp(ns+1,1)+tiny .GE. Tf(ns+1) .AND. -Fnet-Fcis .LT. 0d0) THEN
+            Tsbc = .true.
+            disdt = MIN((-Fnet-Fcis)/rhoice/qm(ns+1),0d0)
+         ENDIF
+      dhidt	= disdt - dibdt ! original
 
    endif
 
@@ -650,7 +664,13 @@ endif
 !     matrix coefficients [matj] {x} = {D}
 !-----------------------------------------------------------------------
 
-         matj(:,:) = 0.d0
+       if ( thin_snow_active ) then
+          ntot=ni+2
+       else
+          ntot=ns+2
+       endif
+
+         matj(0:ntot-1,0:ntot-1) = 0.d0
 
 
          k0 = kki(0)
@@ -674,6 +694,8 @@ endif
          if ( Tsbc .and. thin_snow_active ) &
          matj(ni+1,j) = - rhoice * em(j) * dzi(j)
       ENDDO
+! FD debug
+write(*,*) 'mass',ni,dt0(ni)
 
      if ( .not.thin_snow_active ) then
 
@@ -750,6 +772,8 @@ endif
             matj(j  ,j) = matj(j  ,j) - rhoice * w(j-1) * cp(j  ) * 0.5d0
             DT0(j)      = DT0(j)      + rhoice * w(j-1) * em(j  ) * 0.5d0
           enddo
+! FD debug
+write(*,*) 'adv down',ni,dt0(ni)
          endif
 
 ! metric terms, newton terms for change in thickness
@@ -802,8 +826,11 @@ endif
          endif
 
 ! surface treatment assuming melting, looks like an upwind formulation (em=cp_ice*Tf at surface)
+! if no melting w=0 anyway
          j=ni
             DT0(j)      = DT0(j)      - rhoice * w(j  ) * em(j+1)
+! FD debug
+write(*,*) 'adv up',j,dt0(j),w(j)
 
 ! metric terms, newton terms for change in thickness
          if (adv_upwind) then
@@ -933,17 +960,11 @@ endif
 ! prepare linear solver
 !-----------------------------------------------------------------------
 
-       if ( thin_snow_active ) then
-          ntot=ni+2
-       else
-          ntot=ns+2
-       endif
-
       residual=0d0
       do j=1,ntot-1
-         residual=residual+dt0(j)
+         residual=residual+abs(dt0(j))
 ! FD debug
-write(*,*) 'res',j,dt0(j)
+if (extra_debug) write(*,*) 'res',j,dt0(j)
       enddo
       if (debug) write(*,*) 'residual',counter,residual
 ! FD debug
@@ -993,8 +1014,6 @@ write(*,*) 'res',j,dt0(j)
 ! always melting or accreting ice to the bottom
      temp(0,1) = temp(0,0)
      w(0)=w(0)+tout(0)
-! FD debug
-write(*,*) 'w bottom 1',w(0)
 
 ! ice column increment to temperature
       DO j=1,ni
@@ -1021,17 +1040,15 @@ write(*,*) 'w bottom 1',w(0)
 
       if (Tsbc) then
 ! melting case
-        w(ns) = w(ns) + tout(ns+1)
+        w(ni) = w(ni) + tout(ni+1)
         temp(ni+1,1) = Tf(ni+1)
       else
 ! cold surface case, update temperature
         temp(ni+1,1) = temp(ni+1,0) + tout(ni+1)
       endif
-! in any case, the temperature of snow is overwritten by that of ice
-      temp(ni+2:ns+1,1) = temp(ni+1,1)
      endif
 
-         DO j=1,ns
+         DO j=1,ntot-1
             IF (temp(j,1) .GT. Tf(j)+tiny) THEN
 ! FD debug
 if (debug) then
@@ -1045,6 +1062,11 @@ endif
 !               kki(j+1)=kki(j+1)*0.1d0
             ENDIF
          ENDDO
+
+! in any case, the temperature of snow is overwritten by that of ice
+     if ( thin_snow_active ) then
+      temp(ni+2:ns+1,1) = temp(ni+1,1)
+     endif
 
 !------------------------------------------------------------------------
 !     Update conductive heat fluxes
@@ -1073,7 +1095,7 @@ endif
 ! FD debug
 if (extra_debug) then
  if ( .not.thin_snow_active ) then
-  write(*,*) 'SBCond snow',Tsbc,Fnet,Fcss
+  write(*,*) 'SBCond snow',Tsbc,Fnet,Fcss, temp(ns+1,1)
  else
   write(*,*) 'SBCond ice',Tsbc,Fnet,Fcis,kki(ni), temp(ns+1,1), temp(ni,1)
 endif
@@ -1162,10 +1184,17 @@ endif
          Elay = func_El(Tf(j),temp(j,1))*henew(j)*rhoice
          Eint = Eint+Elay
       ENDDO
+     if (thin_snow_active) then
+      DO j=ni+1,ns
+         Elay = em_thin_snow * henew(j) * rhosno
+         Eint = Eint+Elay
+      ENDDO
+     else
       DO j=ni+1,ns
          Elay = func_El(Tf(j),temp(j,1))*henew(j)*rhosno
          Eint = Eint+Elay
       ENDDO
+     endif
      
       dEin = Eint-Ein0		! diff intl E [J/m2]
 ! FD debug
@@ -1216,13 +1245,6 @@ endif
        CLOSE(1)
        STOP 'energy not conserved'
       ENDIF
-
-! posttreatment if thin snow, assume uniform profile
-     if ( thin_snow_active ) then
-      DO j=ni+1,ns
-         temp(j,1) = temp(ns+1,1)
-      ENDDO
-     endif
 
       IF (hi_b(1) .LT. hicut) THEN
          hi_b(1) = hicut
