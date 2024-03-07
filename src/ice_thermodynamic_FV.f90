@@ -292,14 +292,15 @@ subroutine ice_thermo(dtice)
                              zzp    ! mid-cell z height (m)
   logical lstop_minfraliq, lstop_heat, lstop_salt
   real(8) sumhmelt ! sum of all interior melting velocity
+  character, external :: real_to_char
 
   lstop_minfraliq = .false.
   lstop_heat      = .false.
   lstop_salt      = .false.
 
 ! FD debug
-  debug=.true.
-  extra_debug=.true.
+!  debug=.true.
+!  extra_debug=.true.
 !  adv_br = .true.
   adv_upwind_br = .true.
   adv_upwind = .true.
@@ -909,6 +910,16 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
          matj(0,0) =   rho(0) * energy_bot       ! w increment
          matj(1,0) = - k0                        ! dFcib/dT increment
 
+! implicit term in temperature for BC bottom (derivation of energy_bot)
+         matj(1,0) =  matj(1,0) &
+                     + w(0) * rho(0) * cp(1) * wog(0)
+
+! liquid fraction terms for BC bottom (derivation of energy_bot)
+      j=1
+         jm=j+ns+1
+         matj(jm ,0) = matj(jm ,0) &
+                     + w(0) * rho(0) * dedp(j) * wog(0)
+
 ! for normal cells
       DO j=1,ns
          k0 = kki(j-1)
@@ -964,6 +975,14 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
                        -          rho(j  ) * em(j  ) * wog(j-1)             ! w increment
          matj(j-1,j) = - k0 &                                               ! dFcss/dT increment
                        - w(j-1) * rho(j-1) * cp(j-1) * wsg(j-1)             ! + variation due to top cell temp variation
+      ENDIF
+
+! liquid fraction terms for BC top (derivation of energy_bot)
+      j=ns+1
+      IF (Tsbc .and. ni==ns) THEN
+         jm=j+ns ! +1-1
+         matj(jm ,j) = matj(jm ,j) &
+                       - w(j-1) * rho(j-1) * dedp(j-1) * wsg(j-1)             ! + variation due to top cell temp variation
       ENDIF
 
 !-----------------------------------------------------------------------
@@ -1189,10 +1208,13 @@ if (extra_debug) write(*,*) 'res',j,dt0(j)
       if (debug) write(*,*) 'residual',counter,residual
 ! FD debug
 if (extra_debug) then
-! write(*,*) 'mat'
-! do j=0,ntot-1
-!  write(*,'(20(e13.6,1x))') matj(0:ntot-1,j),dt0(j)
-! enddo
+ write(*,*) 'mat'
+ do j=0,ntot-1
+  write(*,'(40(a1))') (real_to_char(matj(k,j)),k=0,ntot-1)!,real_to_char(dt0(j))
+ enddo
+ do j=0,ntot-1
+  write(*,'(40(e8.1,1x))') matj(0:ntot-1,j),dt0(j)
+ enddo
  write(*,*) 'before solving'
  write(*,'(I6,300(1x,e9.3))') counter, w(0:ns)
 ! write(*,'(I6,300(1x,e9.3))') counter, um(1:ns)
@@ -1484,7 +1506,7 @@ if (debug) write(*,*) 'energy',Einp/dtice,dEin/dtice
 !-----------------------------------------------------------------------
       
 ! FD debug
-if (debug) then
+if (extra_debug) then
  write(*,*) 'snow',hs_b,-w(ns)
  write(*,*) 'hice',hi_b,-w(ni),w(0)
  write(*,'(I6,300(1x,e9.3))') counter, w(0:ns)
@@ -1510,8 +1532,8 @@ endif
          lstop_heat = .true.
          write(*,*) 'heat not conserved'
       ENDIF
-!      IF ( lstop_minfraliq .or. lstop_salt .or. lstop_heat ) THEN
-      IF ( counter > 10 ) THEN
+      IF ( lstop_minfraliq .or. lstop_salt .or. lstop_heat .or. counter > 10 ) THEN
+!      IF ( counter > 10 ) THEN
        OPEN(1,file='restart.dat')
        WRITE(1,*) nlice,nlsno,ith_cond,dtice
        WRITE(1,*) ti(1:nlice),ts(1:nlsno),tsuold,tbo
@@ -1682,4 +1704,13 @@ end module ice_thermodynamic_FV
 !-----------------------------------------------------------------------------
 !-----------------------------------------------------------------------------
 
+      function real_to_char(r)
+      implicit none
+      ! arguments
+      real(8) r
+      character(len=1) real_to_char
 
+      real_to_char = '*'
+      if (abs(r) < 1e-11) real_to_char = '.'
+
+      end function real_to_char
