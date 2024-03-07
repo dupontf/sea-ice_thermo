@@ -202,52 +202,54 @@ subroutine ice_thermo(dtice)
     msurf,&! total melting at the ice surface		[m]
     qice ,&! specific humidity  at ice surf.		[kg/kg]
     Eint ,&! internal energy in all layers		[J/m2]
-    Fr(0:maxlay)    ,&! sw rad heat flux at s/i internal level 	[W/m2]
-    ki(0:maxlay)    ,&! ice  thermal conductivity			[W/m/C]
-    ks(0:maxlay)    ,&! snow thermal conductivity			[W/m/C]
-    kki(0:maxlay)    ,&! ice  thermal conductivity			[W/m/C]
-    kks(0:maxlay)    ,&! ice  thermal conductivity			[W/m/C]
-    em(0:maxlay)    ,&! volumetric enthalpiy	[W/m3]
-    em0(0:maxlay)    ,&! old volumetric enthalpiy	[W/m3]
-    cp(0:maxlay)    ,&! heat capacity for ice	[W/kg/K^-1]
-    dedp(0:maxlay)    ,&! heat capacity for ice	[W/kg/K^-1]
-    dsidt(0:maxlay)    ,&! 1st derivate of liquidus salinity relative to temperature
-    R(0:maxlay)    ,&! penetrating shortwave radiation		[W/m3]
-    sali(0:maxlay,0:1),&! internal sea ice salinity			[psu]
-    siold(0:maxlay),&! initial ice salinity			[psu]
-    phib(0:maxlay,0:1),&! brine fraction			[1]
-    sibr(0:maxlay,0:1),&! brine salinity			[psu]
-    Tf(0:maxlay)    ,&! ice freezing temp. of salinity S		[C]
-    w(0:maxlay)  ,&! grid advection velocity			[m/s]
-    wb(0:maxlay)  ,&! convective brine velocity			[m/s]
-    rho(0:maxlay) , & ! density   [kg/m3]
-    um(maxlay) , &   ! melting speed (m/s)
-    ub(maxlay) , &   ! brine channel lateral speed (m/s)
-    hi_b(0:1)     ,&! ice thickness (m)
-    hs_b(0:1)  ,&   ! snow thickness (m)
-    wsg(0:maxlay) ,&! sign of vertical velocity
-    wog(0:maxlay) ,&! opposed sign of vertical velocity
-    wsb(0:maxlay) ,&! sign of vertical brine velocity
-    wob(0:maxlay)   ! opposed sign of vertical brine velocity
-      real(8), dimension(maxlay) :: &
+    Fr(0:ns+1)      ,&! sw rad heat flux at s/i internal level 	[W/m2]
+    ki(0:ns+1)      ,&! ice  thermal conductivity			[W/m/C]
+    ks(0:ns+1)      ,&! snow thermal conductivity			[W/m/C]
+    kki(0:ns+1)     ,&! ice  thermal conductivity			[W/m/C]
+    kks(0:ns+1)     ,&! ice  thermal conductivity			[W/m/C]
+    em(0:ns+1)      ,&! volumetric enthalpiy	[W/m3]
+    em0(0:ns+1)     ,&! old volumetric enthalpiy	[W/m3]
+    eb(0:ni+1)      ,&! brine enthalpiy	[W/m3]
+    eb0(0:ni+1)     ,&! old brine enthalpiy	[W/m3]
+    cp(0:ns+1)      ,&! heat capacity for ice	[W/kg/K^-1]
+    dedp(0:ns+1)    ,&! heat capacity for ice	[W/kg/K^-1]
+    dsidt(0:ns+1)   ,&! 1st derivate of liquidus salinity relative to temperature
+    R(0:ns+1)       ,&! penetrating shortwave radiation		[W/m3]
+    sali(0:ns+1,0:1),&! internal sea ice salinity			[psu]
+    siold(0:ns+1)   ,&! initial ice salinity			[psu]
+    phib(0:ns+1,0:1),&! brine fraction			[1]
+    sibr(0:ns+1,0:1),&! brine salinity			[psu]
+    Tf(0:ns+1)      ,&! ice freezing temp. of salinity S		[C]
+    w(0:ns)         ,&! grid advection velocity			[m/s]
+    wb(0:ni)        ,&! convective brine velocity			[m/s]
+    rho(0:ns+1)    , & ! density   [kg/m3]
+    um(ns)         , &   ! melting speed (m/s)
+    ub(ni)         , &   ! brine channel lateral speed (m/s)
+    hi_b(0:1)       ,&! ice thickness (m)
+    hs_b(0:1)       ,&   ! snow thickness (m)
+    wsg(0:ns)       ,&! sign of vertical velocity
+    wog(0:ns)       ,&! opposed sign of vertical velocity
+    wsb(0:ns)       ,&! sign of vertical brine velocity
+    wob(0:ns)         ! opposed sign of vertical brine velocity
+      real(8), dimension(ns) :: &
              he, heold, henew
 
-      real(8) &
-                temp (0:maxlay,0:1) ! internal sea ice temperature		[C]
+      real(8) temp (0:ns+1,0:1) ! internal sea ice temperature		[C]
 
-      real(8) &
-                matj(0:maxlay,0:maxlay) ! jacobian matrix		[C]
+! full matrix
+      real(8) matj(0:ns+ni+1,0:ns+ni+1) ! jacobian matrix		[C]
 
 ! LU Solver START
-      real(8) &
-                matband(2*maxlay,maxlay) ! band matrix
+      real(8) matband(3*(ns+ni+2),ns+ni+2) ! band matrix
       integer ntot,ml,mu,mt,info,bandmax
-      integer ipvt(maxlay)
-      real(8) work(maxlay),rcond,residual
+      integer ipvt(ns+ni+2)
+      real(8) work(ns+ni+2)
+      real(8) rcond,residual
 ! LU Solver END
 
-      real(8) AT1(0:maxlay), BT1(0:maxlay), CT1(0:maxlay), DT0(0:maxlay), &
-      tout(0:maxlay), hsmemo, Rtrans
+! tri-diagonal solver for temperature only
+!      real(8) AT1(0:ns+1), BT1(0:ns+1), CT1(0:ns+1)
+      real(8) DT0(0:ns+ni+1), tout(0:ns+ni+1), Rtrans
 
       real(8) :: sice, &
              latmelt, ftot, sstznew, &
@@ -259,7 +261,7 @@ subroutine ice_thermo(dtice)
   character (len=20) :: Sprofile
   integer i,j,counter,k
   real(8) dzf, es, zssdqw, zrchu1, zrchu2, q0, zref, k0, k1
-  real(8), dimension(0:maxlay) :: tiold, tinew
+  real(8), dimension(0:ns+1) :: tiold, tinew
   real(8) elays0
   logical :: debug=.false.
   logical :: extra_debug=.false.
@@ -272,26 +274,45 @@ subroutine ice_thermo(dtice)
 
   real(8),save :: latvap = 2.5e6_8        ! J/kg latent heat of vaporization
   real(8),save :: latsub = 2.834e6_8      ! J/kg latent heat of sublimation
-  logical :: adv_upwind=.false.
-  logical, dimension(maxlay) :: internal_melt
-  integer, dimension(maxlay) :: im
+  logical :: adv_upwind = .false.
+  logical :: adv_upwind_br = .false.
+  logical :: adv_br = .false.
+  logical, dimension(ns) :: internal_melt
+  integer, dimension(ns) :: im
   integer jm,jk,nm,js
-  real(8) :: sumum
-  real(8) liquifrac_bot
+  real(8) :: sumum, sumsal, dsaldt, maxvel
+  real(8) liquifrac_bot, minfraliq
   real(8) :: &
       salinis	=   1.0_8, &    ! salinity at ice surf			[psu]
       salinib	=  10.0_8       ! salinity at ice base			[psu]
 
+! permeability arrays
+  real(8), dimension(ni) :: perm, & ! permeability at each ice layer (center)
+                              ra, & ! local Raileigh number (cell center)
+                             zzp    ! mid-cell z height (m)
+  logical lstop_minfraliq, lstop_heat, lstop_salt
+  real(8) sumhmelt ! sum of all interior melting velocity
+
+  lstop_minfraliq = .false.
+  lstop_heat      = .false.
+  lstop_salt      = .false.
+
 ! FD debug
   debug=.true.
   extra_debug=.true.
+!  adv_br = .true.
+  adv_upwind_br = .true.
+  adv_upwind = .true.
       hicut=1.e-2_8
+      bandmax=3*(ns+ni+2) ! need to defined as in the variable declaration
 
 ! initialize to false the internal melt
       internal_melt(:) = .false.
       um(:)=0.0_8
       ub(:)=0.0_8
       wb(:)=0.0_8
+      fsbr = 0.0_8
+      fhbr = 0.0_8
 
 !------------------------------------------------------------------------
 !     condition on ice thickness
@@ -319,27 +340,28 @@ subroutine ice_thermo(dtice)
       uiofix=   0.000_8 ! constant relative ice-ocean velocity	[m/s]
       liquifrac_bot = 0.4_8
       iliquid_cond = 2
-      ith_cond=2
+      ith_cond=1
       sibr(0,0) = func_liqu_sa(tbo - temp0)
       salinib = liquifrac_bot * sibr(0,0)
 
 ! FD debug test constant salinity
-      salinib = 4.0_8
-      si(:) = 4.0_8
-      liquifrac_bot = salinib / sibr(0,0)
+!      salinib = 4.0_8
+!      si(:) = 4.0_8
+!      liquifrac_bot = salinib / sibr(0,0)
 
 ! FD debug
+!dtice=3600.0_8
 !hs=0.0_8
 !ts(:)=tsu
 !oceflx=0.0_8
 !swradab_s=0.0_8
 !swradab_i=0.0_8
-snowfall=0.0_8
+!snowfall=0.0_8
 !flat=0.0_8
 !fsens=0.0_8
 !swrad=400.0_8
 !dwnlw=300.0_8
-hs=0.0_8
+!hs=0.0_8
 !ti=tbo
 !ts=tbo
 !tsu=temp0
@@ -464,13 +486,24 @@ hs=0.0_8
             Tf(j)     = 0.0_8
             ki(j)     = func_ki(sali(j,0),tiold(j))
             sibr(j,:) = func_liqu_sa(tiold(j))
-            phib(j,:) = sali(j,0) / sibr(j,0)
+            phib(j,:) = 0.0_8
+            if (sibr(j,0) > 0.0_8) phib(j,:) = sali(j,0) / sibr(j,0)
             em(j)     = func_El_mush(tiold(j),phib(j,0))
             cp(j)     = func_cp_mush(tiold(j),phib(j,0))
             dedp(j)   = func_dedp(tiold(j),phib(j,0))
             dsidt(j)  = func_liqu_sadt(tiold(j))
       ENDDO
       em0(0:ns+1) = em(0:ns+1)
+
+! brine enthalpy
+      DO j=0,ni
+         eb(j) = cp_wat * tiold(j)
+      ENDDO
+      eb0(0:ni) = eb(0:ni)
+
+!------------------------------------------------------------------------
+!     Set conductivity
+!------------------------------------------------------------------------
 
       DO j=0,ns+1					! snow thermal conductivity
          IF (j .LT. ni) THEN
@@ -493,6 +526,46 @@ hs=0.0_8
       kki(ni:ns)=kks(ni:ns)
 
 !------------------------------------------------------------------------
+!     Set permeability for brine advection 
+!------------------------------------------------------------------------
+
+if (adv_br) then
+ i_perm_eff=1
+ i_perm_for=1
+ i_Ra=2 ! GN2013
+      call ice_permeability(ni,phib(1,0),perm,dzi)
+      do k=1,ni
+        zzp(k) = 0.5_8 * (zi(k-1)+zi(k)) * hi
+        call ice_rayleigh_local(sibr(k,0),seasal,perm(k),ra(k),zzp(k))
+      enddo
+      call vertical_brine_velocity_GN(ni,Ra,heold,ub,wb)
+! FD debug
+if (debug) then
+ maxvel = abs(wb(0)) / heold(1)
+ do j=1,ni
+    maxvel = max(maxvel, abs(wb(j)) / heold(j), abs(ub(j)) / heold(j) )
+ enddo
+ write(*,*) 'Courant number for brine advection', maxvel * dtice
+endif
+ if (extra_debug) then
+ write(*,*) 'vertical brine velocity'
+ write(*,'(300(e10.3))') ub(1:ni)
+ write(*,'(300(e10.3))') wb(0:ni)
+! write(*,'(300(e10.3))') he(1:ni)/dtice
+ endif
+endif
+
+!------------------------------------------------------------------------
+!     add flushing meltwater above a certain threshold
+!------------------------------------------------------------------------
+
+      call reject_brine_velocity(ni,phib(1,0),heold,um,dtice)
+      sumhmelt = 0.0_8
+      do j=1,ni
+         sumhmelt = sumhmelt + um(j)
+      enddo
+
+!------------------------------------------------------------------------
 !     Initial internal energy in ice (1:ni-1) and snow (ni+1:ns-1)
 !------------------------------------------------------------------------
 
@@ -505,6 +578,12 @@ hs=0.0_8
       ENDDO
 
       dEin = 0.0_8				! diff intl E [J/m2]
+
+      sumsal=0.0_8
+      DO j=1,ni
+         sumsal = sumsal + heold(j) * sali(j,0)
+      ENDDO
+      dsaldt= 0.0_8
 
       ! net longwave radiative flux
       netlw = emi*(dwnlw - stefa*tsu*tsu*tsu*tsu)
@@ -583,6 +662,7 @@ endif
          Fcss = Fcis
          Fcsb = 0.0_8
       ENDIF
+      energy_bot = em(0)
 
 !-----------------------------------------------------------------------
 !     ICE/SNOW case
@@ -641,13 +721,12 @@ if (extra_debug) write(*,*) 'total E/dt, Fnet',Ein0/dtice,Fnet+oceflx
       endif
 
 ! bottom growth or melt
-      energy_bot = -em(0)
-      dibdt	= (oceflx-Fcib) / rhoice / energy_bot
+      dibdt	= - (oceflx-Fcib) / rhoice / energy_bot
 ! FD debug
 if (extra_debug) write(*,*) 'bottom budget',oceflx,Fcib,energy_bot
 
       dhsdt	= dssdt - dsbdt
-      dhidt	= disdt - dibdt ! original
+      dhidt	= disdt - dibdt - sumhmelt ! original
 
       hs_b(1)	= hs_b(0) + dhsdt*dtice
 
@@ -676,12 +755,12 @@ if (extra_debug) write(*,*) 'switch to thin_snow_active',hs_b(1),fthin_snow,Fnet
       Fnet = Fnet - fthin_snow
       kki(ni) = ki(ni) / (hi_b(0) * dzzi(ni))
       sali(ni+1:ns+1,0) = sali(ni,0)
-      sali(ni+1:ns+1,1) = sali(ni,1)
+      sali(ni+1:ns+1,1) = 0.0_8
       temp(ni+1:ns+1,1) = temp(ni,1)
-      phib(ni+1:ns+1,0) = phib(ni,0)
-      phib(ni+1:ns+1,1) = phib(ni,1)
-      sibr(ni+1:ns+1,0) = sibr(ni,0)
-      sibr(ni+1:ns+1,1) = sibr(ni,1)
+      phib(ni+1:ns+1,0) = 0.0_8
+      phib(ni+1:ns+1,1) = 0.0_8
+      sibr(ni+1:ns+1,0) = 0.0_8
+      sibr(ni+1:ns+1,1) = 0.0_8
       em(ni+1:ns+1)     = em(ni)
       ! update ice surface
 
@@ -739,15 +818,20 @@ if (extra_debug) write(*,*) 'switch to thin_snow_active',hs_b(1),fthin_snow,Fnet
          if (w(j) .gt. 0.0_8) wsg(j) = 1.0_8
          wog(j) = 1.0_8 - wsg(j)
       ENDDO
-      DO j=1,ni-1
-         if (wb(j) .gt. 0.0_8) wsb(j) = 1.0_8
-         wob(j) = 1.0_8 - wsb(j)
-      ENDDO
      else ! centered
       DO j=1,ns-1
          wsg(j) = 0.5_8
          wog(j) = 0.5_8
       ENDDO
+     endif
+
+     if (adv_upwind_br) then
+! always upwind for brine advection
+      DO j=1,ni-1
+         if (wb(j) .gt. 0.0_8) wsb(j) = 1.0_8
+         wob(j) = 1.0_8 - wsb(j)
+      ENDDO
+     else ! centered
       DO j=1,ni-1
          wsb(j) = 0.5_8
          wob(j) = 0.5_8
@@ -756,14 +840,15 @@ if (extra_debug) write(*,*) 'switch to thin_snow_active',hs_b(1),fthin_snow,Fnet
 
 ! bottom and top cases: always upwind
      j=0
-         wsg(j) = 0.0_8
          if (w(j) .gt. 0.0_8) wsg(j) = 1.0_8
 !         wsg(j) = 1.0_8 ! always up
          wog(j) = 1.0_8 - wsg(j)
-         wsb(j) = 1.0_8 ! always up
+
+!brine
+         if (wb(j) .gt. 0.0_8) wsb(j) = 1.0_8
          wob(j) = 1.0_8 - wsb(j)
      j=ns
-         wsg(j) = 0.0_8
+!         wsg(j) = 0.0_8
 !         if (w(j) .gt. 0.0_8) wsg(j) = 1.0_8
 !         wog(j) = 1.0_8 - wsg(j)
 ! for compability with previous versions, when snow is melting we still use the surface value, and if ice is melting we use the upwind value.
@@ -818,12 +903,13 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
        matj(0:ntot-1,0:ntot-1) = 0.0_8
 
 
-         k0 = kki(0)
 ! the unknown is w(0)
-         DT0(0)    = - w(0) * rho(0) * energy_bot - oceflx + Fcib ! line 0 is for w(0)
-         matj(0,0) = rho(0) * energy_bot       ! w increment
-         matj(1,0) = k0                        ! dFcib/dT increment
+         k0 = kki(0)
+         DT0(0)    = - w(0) * rho(0) * energy_bot + oceflx - Fcib ! line 0 is for w(0)
+         matj(0,0) =   rho(0) * energy_bot       ! w increment
+         matj(1,0) = - k0                        ! dFcib/dT increment
 
+! for normal cells
       DO j=1,ns
          k0 = kki(j-1)
          k1 = kki(j  )
@@ -831,19 +917,25 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
                           - rho(j)*(henew(j)*em(j)-heold(j)*em0(j)))/dtice & ! time tendency energy
                         + k0 * ( temp(j-1,1) - temp(j,1) ) &
                         + k1 * ( temp(j+1,1) - temp(j,1) )
+         if (j>1) &
          matj(j-1,j) = -k0
          matj(j  ,j) =  k0 + k1 + rho(j) * cp(j) * henew(j) / dtice
+         if (j<ns .or. .not.Tsbc) &
          matj(j+1,j) = -k1
-! liquid fraction term
-         jm=j+ns+1
-         matj(jm ,j) =          rho(j) * dedp(j) * henew(j) / dtice
       ENDDO
 
+! top condition, assuming at this stage that the free variable is temperature (i.e., no melt)
       j=ns+1
          k0 = kki(j-1)
          matj(j-1,j) = - k0
          matj(j  ,j) =   k0 + dzf
          DT0(j)      =   Fnet + Fcsu
+
+! liquid fraction terms
+      DO j=1,ni
+         jm=j+ns+1
+         matj(jm ,j) =          rho(j) * dedp(j) * henew(j) / dtice
+      ENDDO
 
 ! reset terms depending on velocity (j=0 and/or j=ns+1)
 ! Newton terms for change in thickness in rho h E: 
@@ -887,6 +979,10 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
             DT0(j)      = DT0(j)      + rho(j  ) * w(j-1) * em(j  ) * wog(j-1)
           enddo
 
+          j=0
+            matj(j+1,j) = matj(j+1,j) + rho(j  ) * w(j  ) * cp(j  ) * wog(j  ) ! condition at bottom in case of upwind advection
+          j=1
+            matj(j  ,j) = matj(j  ,j) - rho(j  ) * w(j-1) * cp(j  ) * wog(j-1)
 ! starts at j=2 (not j=1) because we know temperature is not the unknown at j-1=0 and so requires some special treatments
           do j=2,ns
             matj(j-1,j) = matj(j-1,j) - rho(j-1) * w(j-1) * cp(j-1) * wsg(j-1)
@@ -965,63 +1061,6 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
             jm=j+ns+1
             matj(jm+1,j) = matj(jm+1,j) + rho(j+1) * w(j  ) * dedp(j+1) * wog(j)
           enddo
-!          j=ns ! covers case of snow fall (w<0)
-!          if ( .not.Tsbc ) &
-!            jm=j+ns+2
-!            matj(jm+1,j) = matj(jm+1,j) + rho(j+1) * w(j  ) * dedp(j+1) * wog(j)
-
-!-----------------------------------------------------------------------
-! add contribution to internal melting
-!-----------------------------------------------------------------------
-
-        nm=0
-        im(:)=0
-        do j=1,ns
-           if (internal_melt(j)) then
-             nm=nm+1
-             im(nm)=j
-           endif
-        enddo
-
-        do jm=1,nm
-           jk=im(jm)
-           j=jk
-              dt0(j) = dt0(j) - um(j) * rho(j) * em(j) ! right hand were melting occurs
-              matj(j,0:ns)=0.0_8                         ! start from scratch for all equations depending on temp at j
-              matj(j,j) = rho(j) * em(j)                ! main newton term
-! correct for newtonian terms at all over layers for change in thickness and velocity
-           do j=1,ns
-              matj(jk,j) = matj(jk,j) - rho(j) * em(j) * dzi(j) ! Newton terms for change in thickness
-           enddo
-! lower transport
-           do j=jk+1,ns
-              matj(jk,j)= rho(j+1) * em(j+1) * os(1,j) ! Newton terms for change in velocity
-           enddo
-! metric terms, newton terms for change in thickness
-          do j=2,jk
-            matj(jk,j) = matj(jk,j) - rho(j-1) * em(j-1) * cs(1,j) * wsg(j-1)
-            matj(jk,j) = matj(jk,j) - rho(j  ) * em(j  ) * cs(1,j) * wog(j-1)
-          enddo
-          do j=jk+1,ns
-            matj(jk,j) = matj(jk,j) + rho(j-1) * em(j-1) * os(1,j) * wsg(j-1)
-            matj(jk,j) = matj(jk,j) + rho(j  ) * em(j  ) * os(1,j) * wog(j-1)
-          enddo
-
-!upper transport
-           do j=jk+1,ns
-              matj(jk,j)= rho(j+1) * em(j+1) * os(2,j) ! Newton terms for change in velocity
-           enddo
-! metric terms, newton terms for change in thickness
-          do j=1,jk
-            matj(jk,j) = matj(jk,j) + rho(j  ) * em(j  ) * cs(2,j) * wsg(j)
-            matj(jk,j) = matj(jk,j) + rho(j+1) * em(j+1) * cs(2,j) * wog(j)
-          enddo
-          do j=jk+1,ns-1
-            matj(jk,j) = matj(jk,j) - rho(j  ) * em(j  ) * os(2,j) * wsg(j)
-            matj(jk,j) = matj(jk,j) - rho(j+1) * em(j+1) * os(2,j) * wog(j)
-          enddo
-
-        enddo ! loop over melting layers
 
 
 !-----------------------------------------------------------------------
@@ -1029,23 +1068,41 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
 !-----------------------------------------------------------------------
 
         do j=1,ni
+         DT0(j ) =  DT0(j ) &
+                       + wb(j-1) * rho(j-1) * eb(j-1) * wsb(j-1)   & ! upward brine heat lower transport
+                       + wb(j-1) * rho(j  ) * eb(j  ) * wob(j-1)   & ! lower transport
+                       - wb(j  ) * rho(j  ) * eb(j  ) * wsb(j  )   & ! upper transport
+                       - wb(j  ) * rho(j+1) * eb(j+1) * wob(j  )   & ! upper transport
+                       - ub(j  ) * rho(j  ) * eb(j  )              & ! cell flushing
+                       - um(j  ) * rho(j  ) * eb(j  )                ! cell flushing
+           matj(j  ,j) = matj(j  ,j)                               & ! brine heat advection
+                       - wb(j-1) * rho(j  ) * cp_wat  * wob(j-1)   & ! lower transport
+                       + wb(j  ) * rho(j  ) * cp_wat  * wsb(j  )   & ! upper transport
+                       + ub(j  ) * rho(j  ) * cp_wat               & ! right hand where drainage occurs
+                       + um(j  ) * rho(j  ) * cp_wat                 ! right hand where meltwater flushing occurs
+           if (j>1) &
+           matj(j-1,j) = matj(j-1,j)                  &
+                       - wb(j-1) * rho(j-1) * cp_wat  * wsb(j-1)     ! lower transport
+           if (j<ni) &
+           matj(j+1,j) = matj(j+1,j)                  &
+                       + wb(j  ) * rho(j+1) * cp_wat  * wob(j  )     ! upper transport
          jm=ns+1+j
          DT0(jm) =  - (henew(j)*sali(j,1)-heold(j)*sali(j,0)) / dtice & ! time tendency energy
-                       + wb(j-1) * sibr(j-1,1) * wsb(j-1)   & ! upward brine lower transport
-                       + wb(j-1) * sibr(j  ,1) * wob(j-1)   & ! lower transport
-                       - wb(j  ) * sibr(j  ,1) * wsb(j  )   & ! upper transport
-                       - wb(j  ) * sibr(j+1,1) * wob(j  )   & ! upper transport
                        + w (j-1) * sali(j-1,1) * wsg(j-1)   & ! lower transport
                        + w (j-1) * sali(j  ,1) * wog(j-1)   & ! lower transport
                        - w (j  ) * sali(j  ,1) * wsg(j  )   & ! upper transport
                        - w (j  ) * sali(j+1,1) * wog(j  )   & ! upper transport
-                       - um(j  ) * sali(j  ,1)              & ! melting flushing
+                       - um(j  ) * sibr(j  ,1)                ! melting flushing
+         DT0(jm) =  DT0(jm)                                 & ! time tendency energy
+                       + wb(j-1) * sibr(j-1,1) * wsb(j-1)   & ! upward brine lower transport
+                       + wb(j-1) * sibr(j  ,1) * wob(j-1)   & ! lower transport
+                       - wb(j  ) * sibr(j  ,1) * wsb(j  )   & ! upper transport
+                       - wb(j  ) * sibr(j+1,1) * wob(j  )   & ! upper transport
                        - ub(j  ) * sibr(j  ,1)                ! flushing of brine into brine channels due to upward brine transport
            matj(jm  ,jm) = henew(j) * sibr(j,1) / dtice            ! diagonal term
            matj(jm  ,jm) = matj(jm  ,jm)                  &
                        - w (j-1) * sibr(j  ,1) * wog(j-1) &  ! lower transport
-                       + w (j  ) * sibr(j  ,1) * wsg(j  ) &  ! upper transport
-                       + um(j)   * sibr(j  ,1)               ! right hand were melting occurs
+                       + w (j  ) * sibr(j  ,1) * wsg(j  )    ! upper transport
            if (j>1) &
            matj(jm-1,jm) = matj(jm-1,jm)                  &
                        - w (j-1) * sibr(j-1,1) * wsg(j-1)    ! lower transport
@@ -1061,11 +1118,11 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
                        - w (j-1) * dsidt(j-1  ) * phib(j-1,1) * wsg(j-1)   ! lower transport
            matj(j   ,jm) = matj(j   ,jm)                                 &
                        - wb(j-1) * dsidt(j    )               * wob(j-1) & ! lower transport
-                       + wb(j  ) * dsidt(j    )               * wob(j  ) & ! upper transport
+                       + wb(j  ) * dsidt(j    )               * wsb(j  ) & ! upper transport
                        - w (j-1) * dsidt(j    ) * phib(j  ,1) * wog(j-1) & ! lower transport
                        + w (j  ) * dsidt(j    ) * phib(j  ,1) * wsg(j  ) & ! upper transport
                        + ub(j  ) * dsidt(j    )                          & ! flushing of brine into brine channels due to upward brine
-                       + um(j  ) * dsidt(j    ) * phib(j  ,1)              ! melting flushing
+                       + um(j  ) * dsidt(j    )                            ! melting flushing
            if (j<ni) &
            matj(j+1 ,jm) = matj(j+1 ,jm)                                 &
                        + wb(j  ) * dsidt(j+1  )               * wob(j  ) & ! upper transport
@@ -1097,7 +1154,7 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
 
 ! top velocity
           if ( Tsbc .and. ns==ni) then ! definitily ice
-           do j=2,ns
+           do j=2,ni
          jm=ns+1+j
             matj(ns+1,jm) = matj(ns+1,jm) - sali(j-1,1) * cs(1,j) * wsg(j-1)
             matj(ns+1,jm) = matj(ns+1,jm) - sali(j  ,1) * cs(1,j) * wog(j-1)
@@ -1105,13 +1162,13 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
           endif
 
 ! metric terms, newton terms for change in thickness for upper transport
-          do j=1,ns-1
+          do j=1,ni-1
          jm=ns+1+j
             matj(0   ,jm) = matj(0   ,jm) + sali(j  ,1) * os(2,j) * wsg(j)
             matj(0   ,jm) = matj(0   ,jm) + sali(j+1,1) * os(2,j) * wog(j)
           enddo
           if ( Tsbc  .and. ns==ni) then ! definitily ice
-           do j=1,ns
+           do j=1,ni
          jm=ns+1+j
             matj(ns+1,jm) = matj(ns+1,jm) + sali(j  ,1) * cs(2,j) * wsg(j)
             matj(ns+1,jm) = matj(ns+1,jm) + sali(j+1,1) * cs(2,j) * wog(j)
@@ -1123,7 +1180,8 @@ if (extra_debug) write(*,*) 'total unknowns',ntot,thin_snow_active
 !-----------------------------------------------------------------------
 
       residual=0.0_8
-      do j=1,ntot-1
+      do j=1,ns-1
+!      do j=1,ntot-1
          residual=residual+abs(dt0(j))
 ! FD debug
 if (extra_debug) write(*,*) 'res',j,dt0(j)
@@ -1131,13 +1189,13 @@ if (extra_debug) write(*,*) 'res',j,dt0(j)
       if (debug) write(*,*) 'residual',counter,residual
 ! FD debug
 if (extra_debug) then
- write(*,*) 'mat'
- do j=0,ntot-1
-  write(*,'(20(e13.6,1x))') matj(0:ntot-1,j),dt0(j)
- enddo
+! write(*,*) 'mat'
+! do j=0,ntot-1
+!  write(*,'(20(e13.6,1x))') matj(0:ntot-1,j),dt0(j)
+! enddo
  write(*,*) 'before solving'
  write(*,'(I6,300(1x,e9.3))') counter, w(0:ns)
- write(*,'(I6,300(1x,e9.3))') counter, um(1:ns)
+! write(*,'(I6,300(1x,e9.3))') counter, um(1:ns)
  write(*,'(I6,300(f8.3,1x))') counter, temp(0:ns+1,1)
  write(*,'(I6,300(f8.3,1x))') counter, sibr(0:ni,1)
  write(*,'(I6,300(f8.3,1x))') counter, phib(0:ni,1)
@@ -1148,9 +1206,7 @@ endif
         ml = ntot - 1
         mu = ml
         MT = ML + MU + 1
-!        write(*,*) 'bandwidth',MT, ML
-!        bandmax=ML+MT
-        bandmax=2*maxlay ! hardcoded for now
+!        write(*,*) 'bandwidth',MT+ML, 3*(ns+ni+2)
       do i=1,ntot
        do k=1,bandmax
          matband(k,i)=0.0_8
@@ -1171,9 +1227,9 @@ endif
 ! FD debug
 if (extra_debug) then
  write(*,*) 'solution'
- do j=0,ntot-1
-  write(*,'(e10.3)') tout(j)
- enddo
+! do j=0,ntot-1
+!  write(*,'(e10.3)') tout(j)
+! enddo
 !if (counter==3) stop
 endif
 !-----------------------------------------------------------------------
@@ -1214,9 +1270,10 @@ endif
 if (debug) then
  write(*,*) 'detecting internal melt at',j,temp(j,1),Tf(j)
 endif
-               temp(j,1) = 0.5_8 * (Tf(j) + tiold(j))
-! in case top melting should start first
-               if (j<ns) temp(j,1) = tiold(j)
+!               temp(j,1) = 0.5_8 * (Tf(j) + tiold(j))
+               temp(j,1) = Tf(j)
+!! in case top melting should start first
+!               if (j<ns) temp(j,1) = tiold(j)
             ENDIF
          ENDDO
 
@@ -1233,6 +1290,7 @@ endif
          phib(j,1) = phib(j,1) + tout(jm)
          sibr(j,1) = func_liqu_sa(temp(j,1))
          sali(j,1) = phib(j,1) * sibr(j,1)
+         eb(j)     = cp_wat * temp(j,1)
       ENDDO
 
 ! From now on, ns retrieves its original sense
@@ -1258,7 +1316,7 @@ endif
 ! FD debug
 if (extra_debug) then
  write(*,'(I6,300(1x,e9.3))') counter, w(0:ns)
- write(*,'(I6,300(1x,e9.3))') counter, um(1:ns)
+! write(*,'(I6,300(1x,e9.3))') counter, um(1:ns)
  write(*,'(I6,300(f8.3,1x))') counter, temp(0:ns+1,1)
  write(*,'(I6,300(f8.3,1x))') counter, sibr(0:ni,1)
  write(*,'(I6,300(f8.3,1x))') counter, phib(0:ni,1)
@@ -1309,6 +1367,9 @@ endif
          dedp(j) = func_dedp(temp(j,1),phib(j,1))
          dsidt(j)= func_liqu_sadt(temp(j,1))
       ENDDO
+      j=0
+      energy_bot = + em(j  ) * wsg(j  ) &
+                   + em(j+1) * wog(j  )
 
 !-----------------------------------------------------------------------
 !     Euler step
@@ -1354,7 +1415,36 @@ endif
           enddo
       endif
 
-      Einp = (Fnet+oceflx+Frad+Fprec+Fthin_snow)*dtice	! E input [J/m2]
+! fluxes associated with brine
+      j=1
+      Fsbr =         + wb(j-1) * sibr(j-1,1) * wsb(j-1)   & ! upward brine lower transport
+                     + wb(j-1) * sibr(j  ,1) * wob(j-1)   & ! lower transport
+                     + w (j-1) * sali(j-1,1) * wsg(j-1)   & ! lower transport
+                     + w (j-1) * sali(j  ,1) * wog(j-1)     ! lower transport
+      Fhbr =         + wb(j-1) * rho(j-1) * eb(j-1) * wsb(j-1)   & ! upward brine heat lower transport
+                     + wb(j-1) * rho(j  ) * eb(j  ) * wob(j-1)     ! lower transport
+      DO j=1,ni
+         Fsbr = Fsbr - sibr(j,1) * ub(j) &
+                     - sibr(j,1) * um(j)
+         Fhbr = Fhbr - ub(j  ) * rho(j  ) * eb(j  )
+         Fhbr = Fhbr - um(j  ) * rho(j  ) * eb(j  )
+      ENDDO
+      j=ni ! loss from top melting
+         Fsbr = Fsbr &
+                     - w (j) * sali(j  ,1) * wsg(j)   & ! upper transport
+                     - w (j) * sali(j+1,1) * wog(j)     ! upper transport
+
+      dsaldt = sumsal
+      sumsal = 0.0_8
+      DO j=1,ni
+         sumsal = sumsal + henew(j) * sali(j,1)
+      ENDDO
+      dsaldt = ( sumsal - dsaldt ) / dtice
+
+! FD debug
+if (debug) write(*,*) 'salinity',Fsbr,dsaldt
+
+      Einp = (Fnet+oceflx+Frad+Fprec+Fthin_snow+Fhbr)*dtice	! E input [J/m2]
 
       
       Eint = 0.0_8
@@ -1398,12 +1488,30 @@ if (debug) then
  write(*,*) 'snow',hs_b,-w(ns)
  write(*,*) 'hice',hi_b,-w(ni),w(0)
  write(*,'(I6,300(1x,e9.3))') counter, w(0:ns)
+ write(*,'(I6,300(1x,e9.3))') counter, um(1:ni)
+ write(*,'(I6,300(1x,e9.3))') counter, wb(0:ni)
+ write(*,'(I6,300(1x,e9.3))') counter, ub(1:ni)
  write(*,'(I6,300(f8.3,1x))') counter, temp(0:ns+1,1)
  write(*,'(I6,300(f8.3,1x))') counter, phib(0:ni,1)
  write(*,'(I6,300(f8.3,1x))') counter, sali(0:ni,1)
+ write(*,'(I6,300(f8.3,1x))') counter, sibr(0:ni,1)
 endif
 ! FD debug if energy not conserved
-      IF ( abs(Einp-dEin)/dtice > 1e-3 ) THEN
+      minfraliq=minval(phib(1:ns,1))
+      IF (minfraliq < 0.0_8) THEN
+         lstop_minfraliq = .true.
+         write(*,*) 'liquidus fraction negative, stop!'
+      ENDIF
+      IF (abs(dsaldt-Fsbr) > 1e-9) THEN
+         lstop_salt = .true.
+         write(*,*) 'salt not conserved'
+      ENDIF
+      IF (abs(Einp-dEin)/dtice > 1e-3) THEN
+         lstop_heat = .true.
+         write(*,*) 'heat not conserved'
+      ENDIF
+!      IF ( lstop_minfraliq .or. lstop_salt .or. lstop_heat ) THEN
+      IF ( counter > 10 ) THEN
        OPEN(1,file='restart.dat')
        WRITE(1,*) nlice,nlsno,ith_cond,dtice
        WRITE(1,*) ti(1:nlice),ts(1:nlsno),tsuold,tbo
@@ -1413,7 +1521,7 @@ endif
        WRITE(1,*) fac_transmi,swradab_i(1:nlice),swradab_s(1:nlsno)
        WRITE(1,*) fsens,flat
        CLOSE(1)
-       STOP 'energy not conserved'
+       STOP 'something bad happened, dumping restart and exiting.'
       ENDIF
 
       IF (hi_b(1) .LT. hicut) THEN
@@ -1481,6 +1589,20 @@ endif
       do j=1,nlsno
         dzs(nlsno-j+1) = henew(j+ni)
       enddo
+
+! call back for bulk salinity and brine variables (only needed for output)
+      do j=1,nlice
+        si(nlice-j+1)=sali(j,1)
+        brine_v(nlice-j+1) = phib(j,1) ! brine volume
+        brine_u(nlice-j+1) =   ub(j)   ! brine flushing velocity
+        brine_r(nlice-j+1) =   ra(j)   ! brine Rayleigh number
+      enddo
+      dhi_bot = dibdt
+      dhi_surf = disdt - sumhmelt
+      dhs = dhsdt
+
+! FD debug
+!stop
 
       end subroutine ice_thermo
 
