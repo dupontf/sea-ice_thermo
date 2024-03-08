@@ -14,11 +14,11 @@ subroutine init_sigma_ice_FE
  implicit none
 ! locals
  integer k
- double precision, dimension(maxlay) :: qm, em, tme, sali
- double precision :: tt1, tt2, tseafrz
+ real(8), dimension(maxlay) :: qm, em, tme, sali
+ real(8) :: tt1, tt2, tseafrz
 
 ! parameters for ice thermodynamics and heat fluxes
-  double precision,save :: tzero  = 273.15d0       ! tzero C => K
+  real(8),save :: tzero  = 273.15d0       ! tzero C => K
 
 !------------------------------------------------------------------------
 !     Some integer constants
@@ -164,35 +164,35 @@ subroutine ice_thermo_FE(dtice)
 !-----------------------------------------------------------------------------
 
 ! specific heat capicity multiplied by mean sea density 
-  double precision,save :: cheat=4.2174d3*1.025d3  ! J/K/m3
+  real(8),save :: cheat=4.2174d3*1.025d3  ! J/K/m3
 
 ! parameters for ice thermodynamics and heat fluxes
-  double precision,save :: tzero  = 273.15d0       ! tzero C => K
+  real(8),save :: tzero  = 273.15d0       ! tzero C => K
 
-  double precision,save :: latvap = 2.5d6          ! J/kg latent heat of vaporization
-  double precision,save :: latsub = 2.834d6        ! J/kg latent heat of sublimation
-  double precision,save :: mlfus = 0.334d6        ! J/kg latent heat of fusion
+  real(8),save :: latvap = 2.5d6          ! J/kg latent heat of vaporization
+  real(8),save :: latsub = 2.834d6        ! J/kg latent heat of sublimation
+  real(8),save :: mlfus = 0.334d6        ! J/kg latent heat of fusion
 
 
-  double precision, parameter :: StefanBoltzman = 5.67d-8
+  real(8), parameter :: StefanBoltzman = 5.67d-8
 
 !-----------------------------------------------------------------------------
 ! arguments
-  double precision       dtice
+  real(8)       dtice
 !locals
-  double precision  &
+  real(8)  &
              sstz, bshf, Fnet, dzf, fwf, &
              es, zrchu1,zrchu2,zref,zssdqw
   integer    k,l
   integer    lice_top
-  double precision, dimension(0:maxlay) :: &
+  real(8), dimension(0:maxlay) :: &
              rhs, a, b, diag, wmesh, wold, a1,b1,c1,d1
-  double precision, dimension(maxlay) :: &
+  real(8), dimension(maxlay) :: &
              kice, &
              he, heold, henew, &
              re, tme, dhe, &
              em, cm, qm, km, rad, sali
-  double precision blhf, &
+  real(8) blhf, &
              submer_is, hdraft, sice, dhi, dhs, dq, &
              m1, m2, k1, theta_ther, eps, topflux, sum0, alb, estef, hmelt, &
              ftot, &
@@ -207,12 +207,12 @@ subroutine ice_thermo_FE(dtice)
 
   logical fixed_tb,melt_ts,melt_tb,panic
   integer :: iteration, maxiter = 100
-  double precision ftot2, sume2, flux2, pi, energy_snow_melt, &
+  real(8) ftot2, sume2, flux2, pi, energy_snow_melt, &
             sublimation_speed, bottom_speed, rom
   logical :: energy_check=.false., thin_snow_active, debug=.false.
-  double precision :: tseafrz, sumrad
-      double precision :: hslim=0.0005d0, hicut=1d-2
-  double precision Fprec, ssnow ! heat flux due to precipitation [W/m2]
+  real(8) :: tseafrz, sumrad
+      real(8) :: hslim=0.0005d0, hicut=1d-2
+  real(8) Fprec, ssnow ! heat flux due to precipitation [W/m2]
 
 
 !FD debug
@@ -964,9 +964,9 @@ end subroutine ice_thermo_FE
    subroutine invert_energy_all(maxlay,em,ti,si)
    implicit none
    integer maxlay
-   double precision em(maxlay),ti(0:maxlay),si(maxlay)
+   real(8) em(maxlay),ti(0:maxlay),si(maxlay)
    integer k
-   double precision ztmelts,zaaa,zbbb,zccc,zdiscrim,tt
+   real(8) ztmelts,zaaa,zbbb,zccc,zdiscrim,tt
       !-------------------
       ! Ice temperatures
       !-------------------
@@ -994,13 +994,13 @@ subroutine cal_energy(maxlay,ti,si,em)
 implicit none
 !arguments
   integer maxlay
-  double precision, dimension(0:maxlay) :: ti
-  double precision, dimension(maxlay)   :: em, si
+  real(8), dimension(0:maxlay) :: ti
+  real(8), dimension(maxlay)   :: em, si
 !locals
   integer k
-  double precision tme, tt1, tt2, qm
+  real(8) tme, tt1, tt2, qm
 ! specific heat capicity multiplied by mean sea density 
-  double precision,save :: mlfus = 0.334d6        ! J/kg latent heat of fusion
+  real(8),save :: mlfus = 0.334d6        ! J/kg latent heat of fusion
 
      do k=1,maxlay
        tt1 = 0.5d0*(ti(k-1)+ti(k))
@@ -1025,13 +1025,13 @@ subroutine degrade_to_two_layer_uniform(  &
  implicit none
 ! arguments
  integer lice_top
- double precision, dimension(maxlay) :: re, em, tme, heold, si
- double precision, dimension(0:maxlay) :: tinew, tiold, wmesh
- double precision ftot,topflux,bshf,heat_melt_to_ocean, &
+ real(8), dimension(maxlay) :: re, em, tme, heold, si
+ real(8), dimension(0:maxlay) :: tinew, tiold, wmesh
+ real(8) ftot,topflux,bshf,heat_melt_to_ocean, &
                   fwf,hinew,hsnew,dhs,hminice,sstz,dtice, &
                   theta_ther
 ! local
- double precision sume, dq, dhi, hmelt, sumh, sumr, sums, tt, efus, sum2, fac
+ real(8) sume, dq, dhi, hmelt, sumh, sumr, sums, tt, efus, sum2, fac
  integer k
 
      wmesh=0.d0
@@ -1081,26 +1081,26 @@ subroutine degrade_to_two_layer_uniform(  &
        wmesh(0)=-dhi/dtice
 ! partial snow case
 ! snow layer
-       sume = 0.d0
-       sumr = 0.d0
+       sume = 0.0
+       sumr = 0.0
        do k=ni+1,ns
         sume = sume + heold(k) * em(k) * re(k)
         sumr = sumr + heold(k) * re(k)
        enddo
        efus = sume/sumr
-       call invert_energy_one(efus,0.d0,tt)
+       call invert_energy_one(efus,0.0,tt)
        if (nlsno==1) then
-         tinew(ni+1:ns) = 2.d0 * tt - tinew(ni) ! trick for nlnso=1
+         tinew(ni+1:ns) = 2.0 * tt - tinew(ni) ! trick for nlnso=1
        else
          tinew(ni+1:ns) = tt
        endif
        sumr = sumr / hs
        ftot = topflux * dtice + dq ! add remaining energy after melting ice to energy available for melting snow
-       fac = max ( ftot / (-sume), 0.d0 )
-       dhs  = min(fac, 1.d0) * hs
+       fac = max ( ftot / (-sume), 0.0 )
+       dhs  = min(fac, 1.0) * hs
        hmelt = dhs * sumr
        fwf  = fwf  + hmelt/dtice/rhowat  ! positive flux for input to ocean
-       dq = max( ftot + sume, 0.d0 )
+       dq = max( ftot + sume, 0.0 )
        wmesh(ns)=dhs/dtice
        hsnew = hs - dhs
 !       heat_melt_to_ocean = heat_melt_to_ocean  + dq/dtice              ! change in heat flux to ocean
@@ -1120,8 +1120,8 @@ end subroutine degrade_to_two_layer_uniform
 !
       IMPLICIT NONE
       integer la
-      double precision A(la), B(la),DIAG(la),RHS(la)
-      double precision tmp,tmpdiag
+      real(8) A(la), B(la),DIAG(la),RHS(la)
+      real(8) tmp,tmpdiag
       INTEGER K
 
 ! first Gauss elimination

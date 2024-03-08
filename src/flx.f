@@ -7,7 +7,7 @@
 !--- and the Scalar Transfer Coefficients over Snow and Sea Ice,
 !--- Boundary Layer Meteorology, v.38, 159-184.
 ! 
-        implicit double precision (a-h,o-z)
+        implicit real(8) (a-h,o-z)
 !       implicit real (a-h,o-z)        
         integer ii
 !--- Constants:
@@ -19,11 +19,11 @@
 !       real kn,L2,lnztz0,lnzqz0,nu,psih2,psim2,psiq,uair
 !       real qair,qsfc,Ri2,Rstar,sqrtCD,tair,thsfc,uair,usave,ustar
 !       real Ri2,Rstar,sqrtCD,usave,ustar
-!       double precision tair,thsfc,uair2,hi2,qair,fsens,flat,qsfc
-!       double precision zchu1,zchu2,CH2,CE2,CD,CDN
+!       real(8) tair,thsfc,uair2,hi2,qair,fsens,flat,qsfc
+!       real(8) zchu1,zchu2,CH2,CE2,CD,CDN
 !       real u_data,x2,z0,zeta,zq2,zref,zt
         dimension b0t(3),b1t(3),b2t(3), b0q(3),b1q(3),b2q(3)
-        real lv,kn,L2,lnztz0,lnzqz0,nu
+        real(8) lv,kn,L2,lnztz0,lnzqz0,nu
         
 !!!	include 'const.cmn'
 !
@@ -41,19 +41,19 @@
 	nu=1.461e-5
 	alphah2=1.0
 	alphae=1.0
-	ai2   = 21.8746   
+	ai2   = 21.8746
 	bi    =-265.5
-        grav  = 9.81            !  gravitational acceleration (m/s2)
-        lv    = 2.501e+6        !  latent heat of vaporization (J/kg)
-        rho2  = 1.275           !  density of dry air (kg/m3)
-        cp    = 1005.           !  heat capacity of dry air (J/kg.K)
-        zref  = 10.             !  (m)
+        grav  = 9.81          !  gravitational acceleration (m/s2)
+        lv    = 2.501e+6      !  latent heat of vaporization (J/kg)
+        rho2  = 1.275         !  density of dry air (kg/m3)
+        cp    = 1005.         !  heat capacity of dry air (J/kg.K)
+        zref  = 10.           !  (m)
 !--- cst rajoutees le 02/08/2001---
-        one   = 1.d0
-        pi    = 4.0 * dtan(one)
+        one   = 1.0
+        pi    = 4.0 * tan(one)
 !--- get surface sphum
         ts2=thsfc-273.16
-        qsfc   =  0.622*6.11/1013.*exp(min(ai2*ts2/(ts2-bi),10.))
+        qsfc  = 0.622*6.11/1013.*exp(min(ai2*ts2/(ts2-bi),10.))
 !
          
 ! FD	if(uair.le.0.) then
@@ -71,7 +71,7 @@
           usave = uair
           uair = 0.5
         else
-          usave = -1.
+          usave = -1.0
 	endif
 !
 	Ri2=grav*zref*(tair-thsfc)/(tair*uair*uair)
@@ -85,13 +85,13 @@
 	   z0=2.4e-3
 	elseif(hi2.gt.0.30.and.hi2.le.2.00) then
 	   z0=1.3e-3
-	elseif(hi2.gt.2.00) then
+	elseif(hi2.gt.2.) then
 	   z0=2.0e-3
 	endif
 !
 !--- Using reference height of 10 m, get u* from uair and z0 using (1)
 !
-	ustar = uair * kn / dlog(zref/z0)
+	ustar = uair * kn / log(zref/z0)
 !
 !--- Get roughness Reynolds number R* = u* z0 / v  (p.163)
 !
@@ -107,7 +107,7 @@
 	   ii=3
 	endif
 
-	alrs=dlog(Rstar)
+	alrs=log(Rstar)
 	lnztz0 = b0t(ii) + b1t(ii)*alrs + b2t(ii)*alrs*alrs
 	lnzqz0 = b0q(ii) + b1q(ii)*alrs + b2q(ii)*alrs*alrs
 	zt = z0*exp(lnztz0)     ! Roughness length for temperature
@@ -116,7 +116,7 @@
 !
 !--- Get neutral drag coefficient CD from (10)  Andreas p. 162
 !
-	CDN = kn**2 / (dlog(zref/z0))**2
+	CDN = kn**2 / (log(zref/z0))**2
 !
 !--- Get neutral CH2 and CE2 from (11), (12) using alphah2=alphae=1.0
 !(p.162)
@@ -151,22 +151,22 @@
            psiq = psih2
 	else if(Ri2.lt.0.) then ! Unstable surface layer case
            x2=(1.-16.*zeta)**0.25
-           psim2 = 2.*dlog((1.+x2)/2.) + dlog((1.+x2*x2)/2.) - 
-     &             2.*dtan(x2)+ pi/2.
-           psih2 = 2.*dlog((1.+x2*x2)/2.)
+           psim2 = 2.*log((1.+x2)/2.) + log((1.+x2*x2)/2.) - 
+     &             2.*tan(x2)+ pi/2.
+           psih2 = 2.*log((1.+x2*x2)/2.)
            psiq = psih2
 	endif
 
 !
 !--- Get transfer coefficients from Andreas & Murphy (2.14-2.15)
 !
-        CD = kn**2 / (dlog(zref/z0)-psim2)**2
+        CD = kn**2 / (log(zref/z0)-psim2)**2
         sqrtCD = CD**0.5
         CH2 = alphah2*kn*sqrtCD / (kn/sqrtCD - lnztz0-(psih2-psim2))
         CE2 = alphae*kn*sqrtCD / (kn/sqrtCD - lnzqz0-(psiq-psim2))
 !---test 10 /08/2001
          CH2 =0.00175
-         CE2 =0.00175   
+         CE2 =0.00175 
 !
 !---  For ECMWF or NCEP analyses, convert 10 m winds to 2 m winds
 !
